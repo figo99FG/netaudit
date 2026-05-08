@@ -30,7 +30,12 @@ const FEATURES = [
   {
     icon: "📤",
     title: "Export Reports",
-    desc: "Download findings as JSON for integration with your existing security tooling.",
+    desc: "Download findings as PDF or JSON for integration with your existing security tooling.",
+  },
+  {
+    icon: "🤖",
+    title: "Local Agent Script",
+    desc: "Download a Python script that auto-discovers your subnet, SSHs into devices, and sends results here automatically.",
   },
 ];
 
@@ -87,6 +92,14 @@ export default function LandingPage() {
             >
               START SCANNING →
             </Link>
+            <a
+              href="/netaudit-agent.py"
+              download="netaudit-agent.py"
+              className="px-8 py-3 rounded font-bold tracking-widest text-sm transition-all"
+              style={{ background: "transparent", color: "var(--green)", border: "1px solid var(--green)" }}
+            >
+              ↓ LOCAL AGENT
+            </a>
           </div>
         </div>
 
