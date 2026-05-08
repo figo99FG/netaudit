@@ -383,6 +383,62 @@ def _extract_from_page(html: str, section: str) -> dict:
     return found
 
 
+def scrape_router_manual(ip: str, username: str, password: str) -> dict:
+    """Visible browser mode — user logs in manually while we intercept API calls."""
+    from playwright.sync_api import sync_playwright
+
+    settings = {}
+    api_responses = []
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False, args=["--window-size=1200,800"])
+        ctx = browser.new_context(ignore_https_errors=True)
+        page = ctx.new_page()
+
+        def on_response(response):
+            try:
+                ct = response.headers.get("content-type", "")
+                if "json" in ct:
+                    try:
+                        data = response.json()
+                        api_responses.append({"url": response.url, "data": data})
+                        print(f"    [+] Captured API response: {response.url.split('/')[-1]}")
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        page.on("response", on_response)
+        page.goto(f"http://{ip}", wait_until="domcontentloaded")
+
+        print(f"    Browser opened at http://{ip}")
+        print(f"    → Log in, then click through: WiFi, Security, Advanced, UPnP tabs")
+        print(f"    → Press Enter here when you're done browsing...\n")
+
+        try:
+            input()
+        except KeyboardInterrupt:
+            pass
+
+        # Extract from final page DOM too
+        try:
+            content = page.content()
+            dom_settings = _extract_from_page(content, "final")
+            settings.update(dom_settings)
+        except Exception:
+            pass
+
+        browser.close()
+
+    # Parse all captured API responses
+    for resp in api_responses:
+        extracted = _extract_from_json(resp["data"], resp["url"])
+        settings.update(extracted)
+
+    print(f"\n[+] Captured {len(api_responses)} API responses, extracted {len(settings)} settings")
+    return settings
+
+
 def settings_to_config(settings: dict, router_ip: str) -> str:
     """Convert scraped settings dict to nvram-style config string."""
     lines = [
@@ -447,6 +503,7 @@ def main():
     parser.add_argument("--ip",       help="Router IP (default: auto-detect)")
     parser.add_argument("--user",     default="admin", help="Admin username")
     parser.add_argument("--password", help="Admin password")
+    parser.add_argument("--show",     action="store_true", help="Show browser window (manual login mode)")
     parser.add_argument("--no-open",  action="store_true")
     args = parser.parse_args()
 
@@ -462,8 +519,13 @@ def main():
     username = args.user
     password = args.password or getpass.getpass(f"[?] Admin password (user: {username}): ")
 
-    print(f"\n[*] Scanning {router_ip} with headless browser...\n")
-    settings = scrape_router(router_ip, username, password)
+    if args.show:
+        print(f"\n[*] Opening browser window — log into your router manually, then browse to WiFi/Security/Advanced settings.")
+        print(f"    We'll capture all API calls in the background. Press Ctrl+C when done browsing.\n")
+        settings = scrape_router_manual(router_ip, username, password)
+    else:
+        print(f"\n[*] Scanning {router_ip} with headless browser...\n")
+        settings = scrape_router(router_ip, username, password)
 
     if len(settings) < 2:
         print("\n[!] Could not extract settings.")
