@@ -1,7 +1,7 @@
 const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
 export type Severity = "critical" | "high" | "medium" | "low" | "info";
-export type DeviceType = "ios" | "asa" | "generic" | "auto";
+export type DeviceType = "ios" | "asa" | "generic" | "home_router" | "auto";
 
 export interface Finding {
   rule_id: string;

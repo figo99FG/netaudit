@@ -27,8 +27,9 @@ import webbrowser
 import urllib.parse
 import getpass
 
-API_URL    = "https://netaudit-production.up.railway.app"
-RESULTS_URL = "https://frontend-cyan-gamma-73.vercel.app/results"
+import os
+API_URL     = os.getenv("NETAUDIT_API", "https://netaudit-production-76e6.up.railway.app")
+RESULTS_URL = os.getenv("NETAUDIT_RESULTS", "https://frontend-cyan-gamma-73.vercel.app/results")
 
 
 def check_deps():
@@ -79,6 +80,92 @@ def get_gateway() -> str:
         return "192.168.0.1"
 
 
+def scrape_sky_hub_requests(ip: str, password: str) -> dict:
+    """
+    Scrape Sky Hub using Playwright with a visible browser so the user can confirm login.
+    Settings pages need the browser session cookie.
+    """
+    from playwright.sync_api import sync_playwright
+    import re as _re
+
+    settings = {}
+    base = f"http://{ip}"
+
+    SKY_PAGES = [
+        ("home",        "sky_index.html"),
+        ("wifi",        "sky_wireless_settings.html"),
+        ("security",    "sky_logs.html"),
+        ("maintenance", "sky_router_status.html"),
+        ("advanced",    "sky_wan_setup.html"),
+    ]
+
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=False, args=["--window-size=1100,750"])
+        ctx = browser.new_context(ignore_https_errors=True)
+        page = ctx.new_page()
+
+        print(f"OK (SKY)")
+
+        # Navigate to root
+        page.goto(base, wait_until="domcontentloaded")
+        page.wait_for_timeout(2000)
+
+        # Auto-fill password if a field is visible
+        print("    Logging in...", end=" ", flush=True)
+        filled = False
+        for sel in ["input[type='password']", "input[name='password']"]:
+            try:
+                el = page.locator(sel).first
+                if el.is_visible(timeout=2000):
+                    el.fill(password)
+                    filled = True
+                    break
+            except Exception:
+                pass
+        if filled:
+            for sel in ["button[type='submit']", "input[type='submit']",
+                        "button:has-text('Login')", "button:has-text('OK')"]:
+                try:
+                    el = page.locator(sel).first
+                    if el.is_visible(timeout=2000):
+                        el.click()
+                        break
+                except Exception:
+                    pass
+            page.wait_for_timeout(3000)
+
+        print("\n" + "=" * 55)
+        print("  >>> BROWSER IS OPEN. If you see the Sky Hub home")
+        print("      dashboard, press Enter. If it's still on the")
+        print("      login screen, log in manually then press Enter.")
+        print("=" * 55)
+        input("  Press Enter when on Sky Hub home page: ")
+        page.wait_for_timeout(1500)
+
+        # Scrape all Sky pages
+        for name, sky_page in SKY_PAGES:
+            url = f"{base}/{sky_page}"
+            print(f"    Visiting {name}...", end=" ", flush=True)
+            try:
+                page.goto(url, wait_until="domcontentloaded", timeout=8000)
+                page.wait_for_timeout(800)
+                html = page.content()
+                if "404" in html[:300] or "File not found" in html[:300]:
+                    print("404")
+                    continue
+                extracted = _extract_sky_hub_settings(html)
+                new_keys = [k for k in extracted if k not in settings]
+                settings.update(extracted)
+                print(f"{len(new_keys)} new settings")
+            except Exception as e:
+                print(f"err")
+
+        browser.close()
+
+    settings["brand"] = "sky"
+    return settings
+
+
 def scrape_router(ip: str, username: str, password: str) -> dict:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
@@ -93,7 +180,6 @@ def scrape_router(ip: str, username: str, password: str) -> dict:
 
         base = f"http://{ip}"
 
-        # Intercept all API/JSON responses
         def on_response(response):
             try:
                 ct = response.headers.get("content-type", "")
@@ -108,7 +194,6 @@ def scrape_router(ip: str, username: str, password: str) -> dict:
 
         page.on("response", on_response)
 
-        # ── OPEN PANEL ───────────────────────────────────────────────────
         print("    Opening admin panel...", end=" ", flush=True)
         try:
             page.goto(base, wait_until="domcontentloaded")
@@ -123,13 +208,16 @@ def scrape_router(ip: str, username: str, password: str) -> dict:
         print(f"OK ({brand.upper()})")
         settings["brand"] = brand
 
-        # ── LOGIN ────────────────────────────────────────────────────────
+        # Sky Hub: use requests-based scraper (no JS needed)
+        if brand == "sky":
+            browser.close()
+            return scrape_sky_hub_requests(ip, password)
+
         print("    Logging in...", end=" ", flush=True)
         _try_login(page, base, username, password, brand)
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(4000)
         print("OK")
 
-        # ── NAVIGATE EACH SECTION ────────────────────────────────────────
         sections = _get_sections(brand, base)
         for name, url in sections:
             print(f"    Visiting {name}...", end=" ", flush=True)
@@ -137,53 +225,17 @@ def scrape_router(ip: str, username: str, password: str) -> dict:
                 page.goto(url, wait_until="domcontentloaded")
                 page.wait_for_timeout(2500)
                 content = page.content()
-                if brand == "sky":
-                    extracted = _extract_sky_hub_settings(content)
-                else:
-                    extracted = _extract_from_page(content, name)
+                extracted = _extract_from_page(content, name)
                 settings.update(extracted)
                 print(f"{len(extracted)} settings")
-            except Exception as e:
+            except Exception:
                 print(f"skipped")
 
-        # ── PARSE API RESPONSES ──────────────────────────────────────────
         if api_responses:
             print(f"    Parsing {len(api_responses)} API response(s)...")
             for resp in api_responses:
                 extracted = _extract_from_json(resp["data"], resp["url"])
                 settings.update(extracted)
-
-        # ── FALLBACK: read JS globals from page ──────────────────────────
-        if len(settings) < 3:
-            print("    Trying JS variable extraction...", end=" ", flush=True)
-            try:
-                page.goto(base, wait_until="domcontentloaded")
-                page.wait_for_timeout(3000)
-                js_settings = page.evaluate("""() => {
-                    const result = {};
-                    // Try common global config objects
-                    const globals = ['deviceInfo', 'routerInfo', 'wifiInfo', 'systemInfo',
-                                     'config', 'settings', 'router', 'sky', 'hub'];
-                    for (const g of globals) {
-                        if (window[g] && typeof window[g] === 'object') {
-                            result[g] = JSON.stringify(window[g]).substring(0, 2000);
-                        }
-                    }
-                    // Try localStorage
-                    for (let i = 0; i < localStorage.length; i++) {
-                        const k = localStorage.key(i);
-                        result['ls_' + k] = localStorage.getItem(k);
-                    }
-                    return result;
-                }""")
-                if js_settings:
-                    for k, v in js_settings.items():
-                        settings[f"js_{k}"] = str(v)[:500]
-                    print(f"{len(js_settings)} JS vars")
-                else:
-                    print("none found")
-            except Exception:
-                print("skipped")
 
         browser.close()
 
@@ -510,17 +562,23 @@ def settings_to_config(settings: dict, router_ip: str) -> str:
 
 def analyze(config_text: str) -> dict | None:
     import requests
-    try:
-        r = requests.post(
-            f"{API_URL}/api/analyze",
-            json={"config_text": config_text, "device_hint": "home_router"},
-            timeout=30,
-        )
-        r.raise_for_status()
-        return r.json()
-    except Exception as e:
-        print(f"[!] API error: {e}")
-        return None
+    for hint in ["home_router", "auto"]:
+        try:
+            r = requests.post(
+                f"{API_URL}/api/analyze",
+                json={"config_text": config_text, "device_hint": hint},
+                timeout=30,
+            )
+            if r.ok:
+                return r.json()
+            if r.status_code == 422 and hint == "home_router":
+                continue  # retry with auto
+            print(f"[!] API error {r.status_code}: {r.text[:400]}")
+            return None
+        except Exception as e:
+            print(f"[!] API error: {e}")
+            return None
+    return None
 
 
 def print_result(result: dict, router_ip: str) -> str:
@@ -586,7 +644,11 @@ def main():
         sys.exit(1)
 
     config_text = settings_to_config(settings, router_ip)
-    print(f"\n[*] Extracted {len(settings)} settings — analysing...")
+    print(f"\n[*] Extracted {len(settings)} settings — config preview:")
+    for line in config_text.splitlines():
+        if not line.startswith("#") and line.strip():
+            print(f"    {line}")
+    print(f"\n[*] Analysing...")
 
     result = analyze(config_text)
     if not result:
