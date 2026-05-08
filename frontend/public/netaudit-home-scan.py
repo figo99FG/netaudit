@@ -135,11 +135,14 @@ def scrape_router(ip: str, username: str, password: str) -> dict:
             print(f"    Visiting {name}...", end=" ", flush=True)
             try:
                 page.goto(url, wait_until="domcontentloaded")
-                page.wait_for_timeout(2500)  # let JS fire XHR/fetch calls
+                page.wait_for_timeout(2500)
                 content = page.content()
-                extracted = _extract_from_page(content, name)
+                if brand == "sky":
+                    extracted = _extract_sky_hub_settings(content)
+                else:
+                    extracted = _extract_from_page(content, name)
                 settings.update(extracted)
-                print(f"{len(extracted)} DOM settings")
+                print(f"{len(extracted)} settings")
             except Exception as e:
                 print(f"skipped")
 
@@ -286,6 +289,55 @@ def _try_login(page, base: str, username: str, password: str, brand: str) -> boo
         return False
 
 
+def _extract_sky_hub_settings(html: str) -> dict:
+    """Extract inline JS vars from Sky Hub page HTML and map to nvram-style keys."""
+    raw = {}
+    for m in re.finditer(r"var\s+(\w+)\s*=\s*'([^']*)'", html):
+        raw[m.group(1)] = m.group(2)
+    for m in re.finditer(r'var\s+(\w+)\s*=\s*"([^"]*)"', html):
+        raw[m.group(1)] = m.group(2)
+    for m in re.finditer(r"var\s+(\w+)\s*=\s*(\d+|true|false)\s*;", html):
+        if m.group(1) not in raw:
+            raw[m.group(1)] = m.group(2)
+
+    s = {}
+    if raw.get("sky_WirelessAllSSIDs"):
+        s["wl_ssid"] = raw["sky_WirelessAllSSIDs"]
+    if raw.get("sky_wlAuthMode"):
+        s["wl_security_mode"] = raw["sky_wlAuthMode"]
+    if "sky_wlWep" in raw:
+        s["wl_wep"] = "enabled" if raw["sky_wlWep"] else "disabled"
+    if raw.get("sky_wlWpa"):
+        s["wl_crypto"] = raw["sky_wlWpa"]
+    if raw.get("sky_wlHide") is not None:
+        s["wl_closed"] = raw["sky_wlHide"]
+    if raw.get("sky_wlIsolation") is not None:
+        s["wifi_isolation"] = raw["sky_wlIsolation"]
+    # WPS
+    if raw.get("WscMode") == "enabled" or raw.get("sky_actualUserWPSState") == "1":
+        s["wps_enable"] = "1"
+    elif raw.get("WscMode") == "disabled":
+        s["wps_enable"] = "0"
+    # Firmware
+    if raw.get("sky_firmware_version"):
+        s["firmware_version"] = raw["sky_firmware_version"]
+    if raw.get("modelName"):
+        s["device_name"] = raw["modelName"]
+    # Sky Hub admin panel is HTTP only
+    s["http_enable"] = "1"
+    # Ping
+    if raw.get("pingenbl") == "enable":
+        s["wan_ping"] = "enabled"
+    # Logging
+    if raw.get("LogBlockSites") is not None:
+        s["log_block_sites"] = raw["LogBlockSites"]
+    if raw.get("LogConnToRouter") is not None:
+        s["log_conn_router"] = raw["LogConnToRouter"]
+    if raw.get("pwd_change_status") is not None:
+        s["pwd_change_status"] = raw["pwd_change_status"]
+    return s
+
+
 def _get_sections(brand: str, base: str) -> list[tuple[str, str]]:
     """Return list of (section_name, url) to scrape per brand."""
     common = [
@@ -296,11 +348,11 @@ def _get_sections(brand: str, base: str) -> list[tuple[str, str]]:
     ]
     brand_sections = {
         "sky": [
-            ("home",         f"{base}/sky/home"),
-            ("wifi",         f"{base}/sky/wifi"),
-            ("security",     f"{base}/sky/security"),
-            ("advanced",     f"{base}/sky/advanced"),
-            ("upnp",         f"{base}/sky/advanced#upnp"),
+            ("home",        f"{base}/sky_index.html"),
+            ("wifi",        f"{base}/sky_wireless_settings.html"),
+            ("security",    f"{base}/sky_logs.html"),
+            ("maintenance", f"{base}/sky_router_status.html"),
+            ("advanced",    f"{base}/sky_wan_setup.html"),
         ],
         "tplink": [
             ("wireless",     f"{base}/webpages/index.html#wireless"),

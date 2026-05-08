@@ -329,7 +329,7 @@ def check_ping_wan(lines: list[str]) -> Finding | None:
     nv = _nvram(lines)
     ping_on = (
         nv.get("block_wan") in ("0", "off", "disabled") or
-        nv.get("wan_ping") in ("1", "on", "enabled") or
+        nv.get("wan_ping") in ("1", "on", "enabled", "enable") or
         re.search(r"block.wan.ping.*=.*(0|off|disable)|respond.ping.*=.*(1|on|enable)", text, re.IGNORECASE)
     )
     if ping_on:
@@ -355,6 +355,39 @@ def check_ssid_broadcast(lines: list[str]) -> Finding | None:
     # Only flag if we can confirm it's broadcasting AND security is weak
     # This is info-level — broadcasting is normal, not inherently bad
     return None  # skip — broadcasting SSID is not a security issue worth flagging
+
+
+def check_outdated_firmware(lines: list[str]) -> Finding | None:
+    nv = _nvram(lines)
+    fw = nv.get("firmware_version") or nv.get("sw_version") or nv.get("router_version") or ""
+    if not fw:
+        return None
+    old = bool(re.match(r"^[1-6]\.", fw) or re.match(r"^7\.0[0-3]\.", fw))
+    if old:
+        return Finding(
+            rule_id="HR-MED-005",
+            severity=Severity.MEDIUM,
+            title=f"Outdated router firmware ({fw})",
+            description="Your router firmware is significantly out of date and likely contains unpatched security vulnerabilities.",
+            affected_line=f"firmware_version={fw}",
+            remediation="Update to the latest firmware.",
+            remediation_snippet="Router admin panel → Maintenance → Firmware Update\nCheck for updates and install the latest version.",
+        )
+    return None
+
+
+def check_wifi_client_isolation(lines: list[str]) -> Finding | None:
+    nv = _nvram(lines)
+    if nv.get("wifi_isolation") == "0" or nv.get("wl_ap_isolate") == "0":
+        return Finding(
+            rule_id="HR-LOW-003",
+            severity=Severity.LOW,
+            title="WiFi client isolation disabled",
+            description="Devices on your WiFi can communicate directly with each other. A compromised device (smart TV, guest phone) can scan and attack other devices on your network.",
+            remediation="Enable AP/client isolation in your wireless settings.",
+            remediation_snippet="Router admin panel → Wireless → Advanced Settings\nEnable: AP Isolation / Client Isolation: On",
+        )
+    return None
 
 
 def check_ntp_not_set(lines: list[str]) -> Finding | None:
@@ -391,6 +424,8 @@ ALL_RULES = [
     check_guest_network_isolation,
     check_http_admin,
     check_old_wifi_standard,
+    check_outdated_firmware,
     check_ping_wan,
+    check_wifi_client_isolation,
     check_ntp_not_set,
 ]
