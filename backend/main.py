@@ -7,8 +7,8 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from models import AnalyzeRequest, LiveScanRequest, ScanResult, DeviceType
 from parser.detector import detect_device_type, extract_hostname, extract_ios_version
-from parser import ios_parser, asa_parser, generic_parser
-from rules import ios_rules, asa_rules, generic_rules
+from parser import ios_parser, asa_parser, generic_parser, home_router_parser
+from rules import ios_rules, asa_rules, generic_rules, home_router_rules
 from engine.scorer import calculate_score
 
 app = FastAPI(title="NetAudit API", version="1.0.0")
@@ -35,6 +35,9 @@ def _run_analysis(config_text: str, device_hint: DeviceType) -> ScanResult:
         case DeviceType.ASA:
             lines = asa_parser.parse(config_text)
             rules = asa_rules.ALL_RULES + generic_rules.ALL_RULES
+        case DeviceType.HOME_ROUTER:
+            lines = home_router_parser.parse(config_text)
+            rules = home_router_rules.ALL_RULES
         case _:
             lines = generic_parser.parse(config_text)
             rules = generic_rules.ALL_RULES

@@ -15,6 +15,7 @@ class DeviceType(str, Enum):
     IOS = "ios"
     ASA = "asa"
     GENERIC = "generic"
+    HOME_ROUTER = "home_router"
     AUTO = "auto"
 
 

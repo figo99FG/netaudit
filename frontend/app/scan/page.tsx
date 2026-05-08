@@ -146,6 +146,7 @@ export default function ScanPage() {
                 style={{ background: "#0d0d0d", border: "1px solid #2a2a2a", color: "#e2e8f0", minWidth: 200 }}
               >
                 <option value="auto">Auto-detect</option>
+                <option value="home_router">Home Router (TP-Link / ASUS / Netgear / Sky…)</option>
                 <option value="ios">Cisco IOS / IOS-XE</option>
                 <option value="asa">Cisco ASA</option>
                 <option value="generic">Generic</option>
