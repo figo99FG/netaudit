@@ -83,19 +83,36 @@ def scrape_router(ip: str, username: str, password: str) -> dict:
     from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
 
     settings = {}
+    api_responses = []
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         ctx = browser.new_context(ignore_https_errors=True)
         page = ctx.new_page()
-        page.set_default_timeout(10000)
+        page.set_default_timeout(12000)
 
         base = f"http://{ip}"
 
-        # ── LOGIN ────────────────────────────────────────────────────────
+        # Intercept all API/JSON responses
+        def on_response(response):
+            try:
+                ct = response.headers.get("content-type", "")
+                if "json" in ct or "javascript" in ct:
+                    try:
+                        data = response.json()
+                        api_responses.append({"url": response.url, "data": data})
+                    except Exception:
+                        pass
+            except Exception:
+                pass
+
+        page.on("response", on_response)
+
+        # ── OPEN PANEL ───────────────────────────────────────────────────
         print("    Opening admin panel...", end=" ", flush=True)
         try:
             page.goto(base, wait_until="domcontentloaded")
+            page.wait_for_timeout(2000)
         except Exception:
             print("FAILED — router not reachable")
             browser.close()
@@ -106,29 +123,110 @@ def scrape_router(ip: str, username: str, password: str) -> dict:
         print(f"OK ({brand.upper()})")
         settings["brand"] = brand
 
+        # ── LOGIN ────────────────────────────────────────────────────────
         print("    Logging in...", end=" ", flush=True)
-        logged_in = _try_login(page, base, username, password, brand)
-        print("OK" if logged_in else "uncertain — continuing anyway")
+        _try_login(page, base, username, password, brand)
+        page.wait_for_timeout(3000)
+        print("OK")
 
-        # ── SCRAPE EACH SECTION ──────────────────────────────────────────
+        # ── NAVIGATE EACH SECTION ────────────────────────────────────────
         sections = _get_sections(brand, base)
         for name, url in sections:
-            print(f"    Scraping {name}...", end=" ", flush=True)
+            print(f"    Visiting {name}...", end=" ", flush=True)
             try:
                 page.goto(url, wait_until="domcontentloaded")
-                page.wait_for_timeout(1500)
+                page.wait_for_timeout(2500)  # let JS fire XHR/fetch calls
                 content = page.content()
                 extracted = _extract_from_page(content, name)
                 settings.update(extracted)
-                print(f"{len(extracted)} settings")
-            except PWTimeout:
-                print("timeout")
+                print(f"{len(extracted)} DOM settings")
             except Exception as e:
-                print(f"skipped ({e})")
+                print(f"skipped")
+
+        # ── PARSE API RESPONSES ──────────────────────────────────────────
+        if api_responses:
+            print(f"    Parsing {len(api_responses)} API response(s)...")
+            for resp in api_responses:
+                extracted = _extract_from_json(resp["data"], resp["url"])
+                settings.update(extracted)
+
+        # ── FALLBACK: read JS globals from page ──────────────────────────
+        if len(settings) < 3:
+            print("    Trying JS variable extraction...", end=" ", flush=True)
+            try:
+                page.goto(base, wait_until="domcontentloaded")
+                page.wait_for_timeout(3000)
+                js_settings = page.evaluate("""() => {
+                    const result = {};
+                    // Try common global config objects
+                    const globals = ['deviceInfo', 'routerInfo', 'wifiInfo', 'systemInfo',
+                                     'config', 'settings', 'router', 'sky', 'hub'];
+                    for (const g of globals) {
+                        if (window[g] && typeof window[g] === 'object') {
+                            result[g] = JSON.stringify(window[g]).substring(0, 2000);
+                        }
+                    }
+                    // Try localStorage
+                    for (let i = 0; i < localStorage.length; i++) {
+                        const k = localStorage.key(i);
+                        result['ls_' + k] = localStorage.getItem(k);
+                    }
+                    return result;
+                }""")
+                if js_settings:
+                    for k, v in js_settings.items():
+                        settings[f"js_{k}"] = str(v)[:500]
+                    print(f"{len(js_settings)} JS vars")
+                else:
+                    print("none found")
+            except Exception:
+                print("skipped")
 
         browser.close()
 
     return settings
+
+
+def _extract_from_json(data, url: str) -> dict:
+    """Recursively extract security-relevant fields from API JSON responses."""
+    found = {}
+    if not isinstance(data, (dict, list)):
+        return found
+
+    def flatten(obj, prefix=""):
+        if isinstance(obj, dict):
+            for k, v in obj.items():
+                key = f"{prefix}{k}".lower().replace("-", "_").replace(" ", "_")
+                if isinstance(v, (dict, list)):
+                    flatten(v, f"{key}_")
+                else:
+                    found[key] = str(v).lower()
+        elif isinstance(obj, list):
+            for i, item in enumerate(obj[:10]):
+                flatten(item, f"{prefix}{i}_")
+
+    flatten(data)
+
+    # Map known API field names to nvram-style keys
+    mappings = {
+        "wps":              "wps_enable",
+        "wps_enabled":      "wps_enable",
+        "upnp":             "upnp_enable",
+        "upnp_enabled":     "upnp_enable",
+        "firewall":         "fw_enable",
+        "firewall_enabled": "fw_enable",
+        "remote_access":    "remote_management",
+        "ssid":             "wl_ssid",
+        "wifi_name":        "wl_ssid",
+        "security_mode":    "wl_akm",
+        "encryption":       "wl_crypto",
+        "password":         "http_passwd",
+    }
+    for api_key, nvram_key in mappings.items():
+        if api_key in found:
+            found[nvram_key] = found[api_key]
+
+    return found
 
 
 def _detect_brand(html: str) -> str:
