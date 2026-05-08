@@ -100,9 +100,28 @@ export default function ScanPage() {
 
       <div className="max-w-4xl mx-auto px-6 py-10">
         <h1 className="text-2xl font-bold mb-2 tracking-wide">Analyze Config</h1>
-        <p className="text-sm mb-8" style={{ color: "var(--text-muted)" }}>
+        <p className="text-sm mb-6" style={{ color: "var(--text-muted)" }}>
           Paste a running-config, upload a file, or connect directly to a device.
         </p>
+
+        {/* New user quickstart banner */}
+        <div className="mb-6 p-4 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+          style={{ background: "#0d1f14", border: "1px solid #00ff8830" }}>
+          <div>
+            <p className="text-sm font-bold mb-1" style={{ color: "var(--green)" }}>Never done this before?</p>
+            <p className="text-xs" style={{ color: "#718096" }}>
+              On a Cisco device, run <code className="px-1 py-0.5 rounded text-xs" style={{ background: "#0a0a0a", color: "#00ff88" }}>show running-config</code> and paste the output below.
+              Or hit <strong style={{ color: "#e2e8f0" }}>Load sample</strong> to see what a scan looks like instantly.
+            </p>
+          </div>
+          <button
+            className="shrink-0 px-4 py-2 rounded font-bold text-xs tracking-widest"
+            style={{ background: "var(--green)", color: "#000" }}
+            onClick={() => { setTab("paste"); setConfigText(SAMPLE_CONFIG); }}
+          >
+            TRY SAMPLE →
+          </button>
+        </div>
 
         {/* Tabs */}
         <div className="flex gap-0 mb-0" style={{ borderBottom: "1px solid #2a2a2a" }}>
