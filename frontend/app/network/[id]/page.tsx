@@ -101,8 +101,7 @@ async function exportPDF(result: NetworkScanResult) {
   // Per-host findings
   result.hosts.forEach(h => {
     if (h.findings.length === 0) return;
-    // @ts-expect-error jspdf-autotable adds lastAutoTable
-    const lastY = (doc as unknown as { lastAutoTable: { finalY: number } }).lastAutoTable?.finalY ?? 72;
+    const lastY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 72;
     const startY = lastY + 8;
     if (startY > 260) doc.addPage();
 
