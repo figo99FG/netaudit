@@ -532,21 +532,54 @@ export default function ScanPage() {
                 </div>
 
                 {netShowSetup && (
-                  <div className="mb-4 space-y-2">
+                  <div className="mb-4 space-y-3">
                     <p className="text-xs" style={{ color: "#718096" }}>
-                      Network scanning requires the backend to run on the same LAN as your devices. Run these commands once in your terminal:
+                      Network scanning runs from your machine — it needs to be on the same network as your devices.
+                      The easiest way is Docker (one command, no setup):
                     </p>
-                    {[
-                      { label: "1. Go to backend folder", cmd: "cd netaudit/backend" },
-                      { label: "2. Install deps (first time only)", cmd: "pip install -r requirements.txt" },
-                      { label: "3. Start local backend", cmd: "uvicorn main:app --reload" },
-                    ].map(s => (
-                      <div key={s.label}>
-                        <div className="text-xs mb-1" style={{ color: "#555" }}>{s.label}</div>
-                        <pre className="text-xs px-3 py-2 rounded font-mono" style={{ background: "#141414", color: "#00ff88", border: "1px solid #1a1a1a" }}>{s.cmd}</pre>
+
+                    {/* Docker command — primary */}
+                    <div>
+                      <div className="text-xs mb-1 font-bold" style={{ color: "#555" }}>OPTION 1 — Docker (recommended)</div>
+                      <div className="flex items-center gap-2">
+                        <pre className="flex-1 text-xs px-3 py-2 rounded font-mono overflow-x-auto"
+                          style={{ background: "#141414", color: "#00ff88", border: "1px solid #1a1a1a" }}>
+                          docker run -p 8000:8000 figo7799/netaudit-agent
+                        </pre>
+                        <button
+                          className="shrink-0 text-xs px-3 py-2 rounded font-bold"
+                          style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}
+                          onClick={() => navigator.clipboard.writeText("docker run -p 8000:8000 figo7799/netaudit-agent")}
+                        >
+                          Copy
+                        </button>
                       </div>
-                    ))}
-                    <p className="text-xs pt-1" style={{ color: "#4a5568" }}>Backend will be ready at http://localhost:8000 — you&apos;ll see &quot;Application startup complete.&quot; in the terminal.</p>
+                      <p className="text-xs mt-1" style={{ color: "#4a5568" }}>
+                        Requires <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noopener noreferrer" style={{ color: "#718096", textDecoration: "underline" }}>Docker Desktop</a>.
+                        First run downloads the image (~80 MB), subsequent runs are instant.
+                      </p>
+                    </div>
+
+                    {/* Python alternative */}
+                    <div>
+                      <div className="text-xs mb-1 font-bold" style={{ color: "#555" }}>OPTION 2 — Python (if you have the source)</div>
+                      <div className="space-y-1">
+                        {[
+                          "cd netaudit/backend",
+                          "pip install -r requirements.txt",
+                          "uvicorn main:app --reload",
+                        ].map((cmd, i) => (
+                          <pre key={i} className="text-xs px-3 py-1.5 rounded font-mono"
+                            style={{ background: "#141414", color: "#a0aec0", border: "1px solid #1a1a1a" }}>
+                            {cmd}
+                          </pre>
+                        ))}
+                      </div>
+                    </div>
+
+                    <p className="text-xs pt-1" style={{ color: "#4a5568" }}>
+                      Agent starts at <code className="px-1 rounded" style={{ background: "#0a0a0a", color: "#718096" }}>http://localhost:8000</code> — click <strong style={{ color: "#e2e8f0" }}>Test connection</strong> once it&apos;s up.
+                    </p>
                   </div>
                 )}
 
@@ -578,7 +611,7 @@ export default function ScanPage() {
                 )}
                 {netPingStatus === "fail" && (
                   <p className="text-xs mt-2" style={{ color: "#ff6666" }}>
-                    ✗ Not reachable — make sure <code className="px-1 rounded" style={{ background: "#1a1a1a" }}>uvicorn main:app --reload</code> is running in the backend folder
+                    ✗ Not reachable — run <code className="px-1 rounded" style={{ background: "#1a1a1a", color: "#00ff88" }}>docker run -p 8000:8000 figo7799/netaudit-agent</code> in your terminal, then try again
                   </p>
                 )}
               </div>
