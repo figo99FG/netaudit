@@ -272,7 +272,7 @@ export default function NetworkResultsPage() {
 
   useEffect(() => {
     try {
-      const cached = sessionStorage.getItem(`net_${id}`);
+      const cached = localStorage.getItem(`net_${id}`);
       if (cached) { setResult(JSON.parse(cached)); return; }
     } catch { /* ignore */ }
     getNetworkResult(id)

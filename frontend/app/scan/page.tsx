@@ -163,7 +163,7 @@ export default function ScanPage() {
         setNetScanning(false);
         // Cache result so the results page can show it even if Supabase write failed
         try {
-          sessionStorage.setItem(`net_${netResult.network_scan_id}`, JSON.stringify(netResult));
+          localStorage.setItem(`net_${netResult.network_scan_id}`, JSON.stringify(netResult));
         } catch { /* storage full — ignore */ }
         router.push(`/network/${netResult.network_scan_id}`);
         return;
