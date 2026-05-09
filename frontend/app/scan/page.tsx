@@ -1,10 +1,16 @@
 "use client";
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { DeviceType } from "@/lib/api";
-import { analyzeConfig, analyzeFile, liveScan } from "@/lib/api";
+import { analyzeConfig, analyzeFile, liveScan, networkScan, pingBackend } from "@/lib/api";
 
-type Tab = "paste" | "file" | "live" | "checklist";
+type Tab = "paste" | "file" | "live" | "network" | "checklist";
+
+const NET_STEPS = [
+  { label: "Discovering hosts",          detail: "nmap ping sweep across subnet",          dur: 30  },
+  { label: "Port scanning & fingerprint", detail: "TCP scan per host, detect device type",  dur: 60  },
+  { label: "Pulling configs & analysing", detail: "SSH / HTTP per host, rule engine run",   dur: 999 },
+];
 
 const CHECKLIST_QUESTIONS = [
   { id: "default_password",    severity: "critical", weight: 20, question: "Is your router still using its default admin password?",              yes_bad: true,  detail: "Default passwords are publicly listed. Anyone on your network can log in." },
@@ -85,6 +91,37 @@ export default function ScanPage() {
   const [liveDevType, setLiveDevType] = useState<DeviceType>("ios");
   const [runNmap, setRunNmap] = useState(false);
 
+  // Network scan fields
+  const [netSubnet, setNetSubnet] = useState("192.168.0.0/24");
+  const [netUser, setNetUser] = useState("admin");
+  const [netPass, setNetPass] = useState("");
+  const [netSshPort, setNetSshPort] = useState(22);
+  const [netLocalUrl, setNetLocalUrl] = useState("http://localhost:8000");
+  const [netPingStatus, setNetPingStatus] = useState<"idle"|"checking"|"ok"|"fail">("idle");
+  const [netShowSetup, setNetShowSetup] = useState(false);
+
+  // Network scan progress
+  const [netScanning, setNetScanning] = useState(false);
+  const [netElapsed, setNetElapsed] = useState(0);
+  const [netStep, setNetStep] = useState(0);
+  const [netActiveSubnet, setNetActiveSubnet] = useState("");
+
+  useEffect(() => {
+    if (!netScanning) return;
+    setNetElapsed(0);
+    setNetStep(0);
+    const tick = setInterval(() => {
+      setNetElapsed(s => {
+        const next = s + 1;
+        if (next >= NET_STEPS[0].dur + NET_STEPS[1].dur) setNetStep(2);
+        else if (next >= NET_STEPS[0].dur) setNetStep(1);
+        else setNetStep(0);
+        return next;
+      });
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [netScanning]);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
@@ -100,25 +137,48 @@ export default function ScanPage() {
       if (tab === "paste") {
         if (!configText.trim()) throw new Error("Paste a config first.");
         result = await analyzeConfig(configText, deviceHint);
+        router.push(`/results/${result.scan_id}`);
       } else if (tab === "file") {
         if (!file) throw new Error("Select a file first.");
         result = await analyzeFile(file, deviceHint);
-      } else {
+        router.push(`/results/${result.scan_id}`);
+      } else if (tab === "live") {
         if (!liveHost || !liveUser || !livePass) throw new Error("Host, username, and password are required.");
         result = await liveScan({
           host: liveHost, port: livePort,
           username: liveUser, password: livePass,
           device_type: liveDevType, run_nmap: runNmap,
         });
+        router.push(`/results/${result.scan_id}`);
+      } else if (tab === "network") {
+        if (!netSubnet || !netPass) throw new Error("Subnet and password are required.");
+        if (netPingStatus !== "ok") throw new Error("Local backend not reachable. Click 'Test connection' first.");
+        setNetActiveSubnet(netSubnet);
+        setNetScanning(true);
+        const netResult = await networkScan({
+          subnet: netSubnet, username: netUser,
+          password: netPass, ssh_port: netSshPort,
+          localUrl: netLocalUrl,
+        });
+        setNetScanning(false);
+        // Cache result so the results page can show it even if Supabase write failed
+        try {
+          sessionStorage.setItem(`net_${netResult.network_scan_id}`, JSON.stringify(netResult));
+        } catch { /* storage full — ignore */ }
+        router.push(`/network/${netResult.network_scan_id}`);
+        return;
+      } else {
+        return;
       }
-      router.push(`/results/${result.scan_id}?data=${encodeURIComponent(JSON.stringify(result))}`);
     } catch (err: unknown) {
+      setNetScanning(false);
       setError(err instanceof Error ? err.message : "Unknown error");
     } finally {
       setLoading(false);
     }
   };
 
+  // remove old catch-all redirect (handled per-tab above)
   const tabStyle = (t: Tab) => ({
     padding: "8px 20px",
     borderRadius: "6px 6px 0 0",
@@ -133,6 +193,111 @@ export default function ScanPage() {
     borderColor: tab === t ? "#2a2a2a" : "#2a2a2a",
     marginBottom: tab === t ? "-1px" : "0",
   } as React.CSSProperties);
+
+  // ── Network scanning progress screen ────────────────────────────────────────
+  if (netScanning) {
+    const mm = String(Math.floor(netElapsed / 60)).padStart(2, "0");
+    const ss = String(netElapsed % 60).padStart(2, "0");
+    const totalEst = 150; // ~2.5 min for /24
+    const pct = Math.min(98, Math.round((netElapsed / totalEst) * 100));
+
+    return (
+      <main className="min-h-screen flex flex-col" style={{ background: "var(--bg)" }}>
+        <nav className="border-b px-6 py-4 flex items-center justify-between" style={{ borderColor: "#2a2a2a" }}>
+          <span className="font-bold text-lg tracking-widest" style={{ color: "var(--green)" }}>
+            NET<span style={{ color: "#e2e8f0" }}>AUDIT</span>
+          </span>
+          <span className="text-xs font-mono" style={{ color: "#555" }}>{mm}:{ss} elapsed</span>
+        </nav>
+
+        <div className="flex-1 flex flex-col items-center justify-center px-6 py-16 gap-10">
+          {/* Header */}
+          <div className="text-center">
+            <div className="text-xs font-bold tracking-widest mb-2" style={{ color: "#555" }}>NETWORK SCAN IN PROGRESS</div>
+            <h1 className="text-3xl font-bold mb-1" style={{ color: "var(--green)" }}>{netActiveSubnet}</h1>
+            <p className="text-sm" style={{ color: "#718096" }}>~2–3 min for a /24 · do not close this tab</p>
+          </div>
+
+          {/* Progress bar */}
+          <div className="w-full max-w-lg">
+            <div className="flex justify-between text-xs mb-2" style={{ color: "#555" }}>
+              <span>Progress</span>
+              <span>{pct}%</span>
+            </div>
+            <div className="w-full h-2 rounded-full overflow-hidden" style={{ background: "#1a1a1a" }}>
+              <div
+                className="h-full rounded-full transition-all duration-1000"
+                style={{ width: `${pct}%`, background: "linear-gradient(90deg,#00cc66,#00ff88)" }}
+              />
+            </div>
+          </div>
+
+          {/* Step list */}
+          <div className="w-full max-w-lg space-y-3">
+            {NET_STEPS.map((step, i) => {
+              const isDone    = i < netStep;
+              const isActive  = i === netStep;
+              const isPending = i > netStep;
+              return (
+                <div key={i} className="flex items-start gap-4 p-4 rounded-lg transition-all"
+                  style={{
+                    background: isActive ? "#0d1f14" : "#0d0d0d",
+                    border: `1px solid ${isActive ? "#00ff8840" : isDone ? "#00ff8820" : "#1a1a1a"}`,
+                  }}>
+                  {/* Icon */}
+                  <div className="shrink-0 w-7 h-7 rounded-full flex items-center justify-center text-sm font-bold mt-0.5"
+                    style={{
+                      background: isDone ? "#00ff8833" : isActive ? "#00ff8822" : "#1a1a1a",
+                      color: isDone ? "#00ff88" : isActive ? "#00ff88" : "#555",
+                      border: `1px solid ${isDone ? "#00ff8855" : isActive ? "#00ff8844" : "#2a2a2a"}`,
+                    }}>
+                    {isDone ? "✓" : i + 1}
+                  </div>
+                  {/* Text */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold" style={{ color: isDone ? "#00ff88" : isActive ? "#e2e8f0" : "#555" }}>
+                        {step.label}
+                      </span>
+                      {isActive && (
+                        <span className="flex gap-1">
+                          {[0,1,2].map(d => (
+                            <span key={d} className="inline-block w-1.5 h-1.5 rounded-full"
+                              style={{
+                                background: "#00ff88",
+                                animation: `pulse 1.2s ease-in-out ${d * 0.2}s infinite`,
+                              }} />
+                          ))}
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-xs mt-0.5" style={{ color: isPending ? "#333" : "#718096" }}>{step.detail}</div>
+                  </div>
+                  {/* Status */}
+                  <div className="shrink-0 text-xs font-bold"
+                    style={{ color: isDone ? "#00ff88" : isActive ? "#ffaa00" : "#333" }}>
+                    {isDone ? "DONE" : isActive ? "RUNNING" : "WAITING"}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+
+          <p className="text-xs text-center" style={{ color: "#333" }}>
+            Results will load automatically when the scan completes
+          </p>
+        </div>
+
+        <style>{`
+          @keyframes pulse {
+            0%, 100% { opacity: 0.2; transform: scale(0.8); }
+            50%       { opacity: 1;   transform: scale(1.2); }
+          }
+        `}</style>
+      </main>
+    );
+  }
+  // ── End scanning screen ───────────────────────────────────────────────────
 
   return (
     <main className="min-h-screen" style={{ background: "var(--bg)" }}>
@@ -170,10 +335,11 @@ export default function ScanPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-0 mb-0" style={{ borderBottom: "1px solid #2a2a2a" }}>
+        <div className="flex gap-0 mb-0 flex-wrap" style={{ borderBottom: "1px solid #2a2a2a" }}>
           <button style={tabStyle("paste")} onClick={() => setTab("paste")}>PASTE CONFIG</button>
           <button style={tabStyle("file")} onClick={() => setTab("file")}>UPLOAD FILE</button>
           <button style={tabStyle("live")} onClick={() => setTab("live")}>LIVE SCAN (SSH)</button>
+          <button style={tabStyle("network")} onClick={() => setTab("network")}>NETWORK SCAN</button>
           <button style={tabStyle("checklist")} onClick={() => setTab("checklist")}>QUICK CHECKLIST</button>
         </div>
 
@@ -181,7 +347,7 @@ export default function ScanPage() {
         <div className="rounded-b rounded-tr p-6" style={{ background: "var(--bg-card)", border: "1px solid #2a2a2a", borderTop: "none" }}>
 
           {/* Device hint (shared) */}
-          {tab !== "live" && (
+          {tab !== "live" && tab !== "network" && tab !== "checklist" && (
             <div className="mb-4">
               <label className="block text-xs font-bold mb-2" style={{ color: "#718096", letterSpacing: "0.1em" }}>
                 DEVICE TYPE
@@ -345,6 +511,142 @@ export default function ScanPage() {
             </div>
           )}
 
+          {/* NETWORK SCAN TAB */}
+          {tab === "network" && (
+            <div className="space-y-4">
+
+              {/* Step 1 — Local backend */}
+              <div className="p-4 rounded-lg" style={{ background: "#0a0a0a", border: "1px solid #2a2a2a" }}>
+                <div className="flex items-center justify-between mb-3">
+                  <div>
+                    <span className="text-xs font-bold px-2 py-0.5 rounded mr-2" style={{ background: "#00ff8822", color: "#00ff88" }}>STEP 1</span>
+                    <span className="text-sm font-bold">Run local backend on your machine</span>
+                  </div>
+                  <button
+                    className="text-xs px-2 py-1 rounded"
+                    style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}
+                    onClick={() => setNetShowSetup(s => !s)}
+                  >
+                    {netShowSetup ? "Hide setup" : "Show setup"}
+                  </button>
+                </div>
+
+                {netShowSetup && (
+                  <div className="mb-4 space-y-2">
+                    <p className="text-xs" style={{ color: "#718096" }}>
+                      Network scanning requires the backend to run on the same LAN as your devices. Run these commands once in your terminal:
+                    </p>
+                    {[
+                      { label: "1. Go to backend folder", cmd: "cd netaudit/backend" },
+                      { label: "2. Install deps (first time only)", cmd: "pip install -r requirements.txt" },
+                      { label: "3. Start local backend", cmd: "uvicorn main:app --reload" },
+                    ].map(s => (
+                      <div key={s.label}>
+                        <div className="text-xs mb-1" style={{ color: "#555" }}>{s.label}</div>
+                        <pre className="text-xs px-3 py-2 rounded font-mono" style={{ background: "#141414", color: "#00ff88", border: "1px solid #1a1a1a" }}>{s.cmd}</pre>
+                      </div>
+                    ))}
+                    <p className="text-xs pt-1" style={{ color: "#4a5568" }}>Backend will be ready at http://localhost:8000 — you&apos;ll see &quot;Application startup complete.&quot; in the terminal.</p>
+                  </div>
+                )}
+
+                <div className="flex gap-2 items-center">
+                  <input
+                    className="flex-1 text-sm px-3 py-2 rounded font-mono"
+                    style={{ background: "#141414", border: `1px solid ${netPingStatus === "ok" ? "#00ff8855" : netPingStatus === "fail" ? "#ff444455" : "#2a2a2a"}`, color: "#e2e8f0" }}
+                    value={netLocalUrl}
+                    onChange={e => { setNetLocalUrl(e.target.value); setNetPingStatus("idle"); }}
+                    placeholder="http://localhost:8000"
+                  />
+                  <button
+                    className="shrink-0 px-4 py-2 rounded text-xs font-bold"
+                    style={{ background: "#1a1a1a", border: "1px solid #2a2a2a", color: "#e2e8f0", minWidth: 120 }}
+                    onClick={async () => {
+                      setNetPingStatus("checking");
+                      const ok = await pingBackend(netLocalUrl);
+                      setNetPingStatus(ok ? "ok" : "fail");
+                    }}
+                  >
+                    {netPingStatus === "checking" ? "Checking..." : "Test connection"}
+                  </button>
+                </div>
+
+                {netPingStatus === "ok" && (
+                  <p className="text-xs mt-2 flex items-center gap-1" style={{ color: "#00ff88" }}>
+                    <span>✓</span> Connected — local backend is running
+                  </p>
+                )}
+                {netPingStatus === "fail" && (
+                  <p className="text-xs mt-2" style={{ color: "#ff6666" }}>
+                    ✗ Not reachable — make sure <code className="px-1 rounded" style={{ background: "#1a1a1a" }}>uvicorn main:app --reload</code> is running in the backend folder
+                  </p>
+                )}
+              </div>
+
+              {/* Step 2 — Scan config */}
+              <div className="p-4 rounded-lg" style={{ background: "#0a0a0a", border: `1px solid ${netPingStatus === "ok" ? "#2a2a2a" : "#1a1a1a"}`, opacity: netPingStatus === "ok" ? 1 : 0.45 }}>
+                <div className="mb-3">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded mr-2" style={{ background: "#00ff8822", color: "#00ff88" }}>STEP 2</span>
+                  <span className="text-sm font-bold">Configure scan</span>
+                </div>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="col-span-2">
+                    <label className="block text-xs font-bold mb-2" style={{ color: "#718096", letterSpacing: "0.1em" }}>SUBNET / RANGE</label>
+                    <input
+                      className="w-full text-sm px-3 py-2 rounded font-mono"
+                      style={{ background: "#141414", border: "1px solid #2a2a2a", color: "#e2e8f0" }}
+                      placeholder="192.168.0.0/24"
+                      value={netSubnet}
+                      onChange={e => setNetSubnet(e.target.value)}
+                      disabled={netPingStatus !== "ok"}
+                    />
+                    <p className="text-xs mt-1" style={{ color: "#4a5568" }}>CIDR (192.168.0.0/24) · range (192.168.0.1-50) · single IP</p>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-2" style={{ color: "#718096", letterSpacing: "0.1em" }}>USERNAME</label>
+                    <input
+                      className="w-full text-sm px-3 py-2 rounded"
+                      style={{ background: "#141414", border: "1px solid #2a2a2a", color: "#e2e8f0" }}
+                      placeholder="admin"
+                      value={netUser}
+                      onChange={e => setNetUser(e.target.value)}
+                      disabled={netPingStatus !== "ok"}
+                      autoComplete="off"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-2" style={{ color: "#718096", letterSpacing: "0.1em" }}>PASSWORD</label>
+                    <input
+                      type="password"
+                      className="w-full text-sm px-3 py-2 rounded"
+                      style={{ background: "#141414", border: "1px solid #2a2a2a", color: "#e2e8f0" }}
+                      placeholder="••••••••"
+                      value={netPass}
+                      onChange={e => setNetPass(e.target.value)}
+                      disabled={netPingStatus !== "ok"}
+                      autoComplete="new-password"
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs font-bold mb-2" style={{ color: "#718096", letterSpacing: "0.1em" }}>SSH PORT</label>
+                    <input
+                      type="number"
+                      className="w-full text-sm px-3 py-2 rounded"
+                      style={{ background: "#141414", border: "1px solid #2a2a2a", color: "#e2e8f0" }}
+                      value={netSshPort}
+                      onChange={e => setNetSshPort(Number(e.target.value))}
+                      disabled={netPingStatus !== "ok"}
+                    />
+                  </div>
+                </div>
+              </div>
+
+              <p className="text-xs px-1" style={{ color: "#4a5568" }}>
+                Only use against networks you own or have written authorisation to test.
+              </p>
+            </div>
+          )}
+
           {/* CHECKLIST TAB */}
           {tab === "checklist" && (() => {
             const answered = Object.keys(checklistAnswers).filter(k => checklistAnswers[k] !== null).length;
@@ -461,21 +763,30 @@ export default function ScanPage() {
 
           {/* Error */}
           {error && (
-            <p className="mt-4 text-sm px-4 py-3 rounded" style={{ background: "#ff444411", color: "#ff6666", border: "1px solid #ff444433" }}>
-              {error}
-            </p>
+            <div className="mt-4 px-4 py-3 rounded flex items-start gap-3" style={{ background: "#1a0a0a", color: "#ff6666", border: "1px solid #ff444455" }}>
+              <span className="text-lg shrink-0">⚠</span>
+              <div>
+                <div className="text-sm font-bold mb-0.5">Scan failed</div>
+                <div className="text-xs" style={{ color: "#ff9999" }}>{error}</div>
+              </div>
+            </div>
           )}
 
           {/* Submit */}
           {tab !== "checklist" && (
-            <div className="mt-6 flex justify-end">
+            <div className="mt-6 flex items-center justify-end gap-3">
+              {tab === "network" && netPingStatus !== "ok" && (
+                <span className="text-xs" style={{ color: "#555" }}>Connect to local backend first</span>
+              )}
               <button
                 onClick={submit}
-                disabled={loading}
+                disabled={loading || (tab === "network" && netPingStatus !== "ok")}
                 className="px-8 py-3 rounded font-bold text-sm tracking-widest transition-all disabled:opacity-40"
                 style={{ background: "var(--green)", color: "#000" }}
               >
-                {loading ? "SCANNING..." : "ANALYZE"}
+                {loading
+                  ? tab === "network" ? "SCANNING NETWORK..." : "SCANNING..."
+                  : tab === "network" ? "SCAN NETWORK" : "ANALYZE"}
               </button>
             </div>
           )}

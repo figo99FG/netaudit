@@ -79,3 +79,61 @@ export async function getResult(scanId: string): Promise<ScanResult> {
   if (!res.ok) throw new Error("Result not found");
   return res.json();
 }
+
+export interface NetworkHostResult {
+  ip: string;
+  hostname?: string;
+  device_type?: string;
+  open_ports: number[];
+  score?: number;
+  grade?: string;
+  summary?: ScanSummary;
+  findings: Finding[];
+  scan_id?: string;
+  error?: string;
+  method?: string;
+}
+
+export interface NetworkScanResult {
+  network_scan_id: string;
+  subnet: string;
+  hosts_found: number;
+  hosts_scanned: number;
+  avg_score: number;
+  total_critical: number;
+  total_high: number;
+  hosts: NetworkHostResult[];
+}
+
+export async function networkScan(params: {
+  subnet: string; username: string; password: string; ssh_port: number;
+  localUrl?: string;
+}): Promise<NetworkScanResult> {
+  const base = params.localUrl?.replace(/\/$/, "") || BASE;
+  const { localUrl: _, ...body } = params;
+  const res = await fetch(`${base}/api/scan/network`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Network scan failed");
+  }
+  return res.json();
+}
+
+export async function pingBackend(url: string): Promise<boolean> {
+  try {
+    const res = await fetch(`${url.replace(/\/$/, "")}/api/health`, { signal: AbortSignal.timeout(3000) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+export async function getNetworkResult(id: string): Promise<NetworkScanResult> {
+  const res = await fetch(`${BASE}/api/scan/network/${id}`);
+  if (!res.ok) throw new Error("Network scan not found");
+  return res.json();
+}

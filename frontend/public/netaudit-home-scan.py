@@ -34,7 +34,7 @@ RESULTS_URL = os.getenv("NETAUDIT_RESULTS", "https://frontend-cyan-gamma-73.verc
 
 def check_deps():
     missing = []
-    for pkg in ["playwright", "requests"]:
+    for pkg in ["requests"]:
         try:
             __import__(pkg)
         except ImportError:
@@ -42,17 +42,8 @@ def check_deps():
     if missing:
         print(f"[!] Missing packages: {', '.join(missing)}")
         print(f"    Run: pip install {' '.join(missing)}")
-        print(f"    Then: playwright install chromium")
         sys.exit(1)
-    # Check chromium is installed
-    try:
-        from playwright.sync_api import sync_playwright
-        with sync_playwright() as p:
-            p.chromium.launch(headless=True).close()
-    except Exception:
-        print("[!] Playwright chromium not installed.")
-        print("    Run: playwright install chromium")
-        sys.exit(1)
+    # Playwright is only needed for non-Sky routers — check lazily at scan time.
 
 
 def get_gateway() -> str:
@@ -81,15 +72,13 @@ def get_gateway() -> str:
 
 
 def scrape_sky_hub_requests(ip: str, password: str) -> dict:
-    """
-    Scrape Sky Hub using Playwright with a visible browser so the user can confirm login.
-    Settings pages need the browser session cookie.
-    """
-    from playwright.sync_api import sync_playwright
-    import re as _re
+    """Scrape Sky Hub using HTTP Digest auth — no browser needed."""
+    import requests as _req
+    from requests.auth import HTTPDigestAuth
 
     settings = {}
     base = f"http://{ip}"
+    auth = HTTPDigestAuth("admin", password)
 
     SKY_PAGES = [
         ("home",        "sky_index.html"),
@@ -97,79 +86,67 @@ def scrape_sky_hub_requests(ip: str, password: str) -> dict:
         ("security",    "sky_logs.html"),
         ("maintenance", "sky_router_status.html"),
         ("advanced",    "sky_wan_setup.html"),
+        ("wan",         "sky_wan_setup.html"),
+        ("eth",         "sky_eth_setup.html"),
     ]
 
-    with sync_playwright() as p:
-        browser = p.chromium.launch(headless=False, args=["--window-size=1100,750"])
-        ctx = browser.new_context(ignore_https_errors=True)
-        page = ctx.new_page()
+    print("OK (SKY)")
+    print("    Logging in...", end=" ", flush=True)
 
-        print(f"OK (SKY)")
+    # Verify credentials with a quick auth check
+    test = _req.get(f"{base}/sky_wireless_settings.html", auth=auth, timeout=8)
+    if test.status_code == 401:
+        print("FAILED (wrong password)")
+        # Fall back: scrape root only (no auth required)
+        try:
+            r = _req.get(base, timeout=8)
+            settings.update(_extract_sky_hub_settings(r.text))
+        except Exception:
+            pass
+        settings["brand"] = "sky"
+        return settings
+    print("OK")
 
-        # Navigate to root
-        page.goto(base, wait_until="domcontentloaded")
-        page.wait_for_timeout(2000)
-
-        # Auto-fill password if a field is visible
-        print("    Logging in...", end=" ", flush=True)
-        filled = False
-        for sel in ["input[type='password']", "input[name='password']"]:
-            try:
-                el = page.locator(sel).first
-                if el.is_visible(timeout=2000):
-                    el.fill(password)
-                    filled = True
-                    break
-            except Exception:
-                pass
-        if filled:
-            for sel in ["button[type='submit']", "input[type='submit']",
-                        "button:has-text('Login')", "button:has-text('OK')"]:
-                try:
-                    el = page.locator(sel).first
-                    if el.is_visible(timeout=2000):
-                        el.click()
-                        break
-                except Exception:
-                    pass
-            page.wait_for_timeout(3000)
-
-        print("\n" + "=" * 55)
-        print("  >>> BROWSER IS OPEN. If you see the Sky Hub home")
-        print("      dashboard, press Enter. If it's still on the")
-        print("      login screen, log in manually then press Enter.")
-        print("=" * 55)
-        input("  Press Enter when on Sky Hub home page: ")
-        page.wait_for_timeout(1500)
-
-        # Scrape all Sky pages
-        for name, sky_page in SKY_PAGES:
-            url = f"{base}/{sky_page}"
-            print(f"    Visiting {name}...", end=" ", flush=True)
-            try:
-                page.goto(url, wait_until="domcontentloaded", timeout=8000)
-                page.wait_for_timeout(800)
-                html = page.content()
-                if "404" in html[:300] or "File not found" in html[:300]:
-                    print("404")
-                    continue
-                extracted = _extract_sky_hub_settings(html)
-                new_keys = [k for k in extracted if k not in settings]
-                settings.update(extracted)
-                print(f"{len(new_keys)} new settings")
-            except Exception as e:
-                print(f"err")
-
-        browser.close()
+    for name, sky_page in SKY_PAGES:
+        url = f"{base}/{sky_page}"
+        print(f"    Visiting {name}...", end=" ", flush=True)
+        try:
+            r = _req.get(url, auth=auth, timeout=8)
+            if r.status_code != 200:
+                print(f"{r.status_code}")
+                continue
+            extracted = _extract_sky_hub_settings(r.text)
+            new_keys = [k for k in extracted if k not in settings]
+            settings.update(extracted)
+            print(f"{len(new_keys)} new settings")
+        except Exception as e:
+            print(f"err ({e})")
 
     settings["brand"] = "sky"
     return settings
 
 
 def scrape_router(ip: str, username: str, password: str) -> dict:
-    from playwright.sync_api import sync_playwright, TimeoutError as PWTimeout
+    import requests as _req
 
-    settings = {}
+    # Detect brand with a plain HTTP request — no browser needed yet
+    print("    Opening admin panel...", end=" ", flush=True)
+    try:
+        r = _req.get(f"http://{ip}", timeout=8)
+        brand = _detect_brand(r.text.lower())
+    except Exception as e:
+        print(f"FAILED — {e}")
+        return {}
+    print(f"OK ({brand.upper()})")
+
+    # Sky Hub gets its own Playwright scraper
+    if brand == "sky":
+        return scrape_sky_hub_requests(ip, password)
+
+    # All other brands: headless Playwright
+    from playwright.sync_api import sync_playwright
+
+    settings = {"brand": brand}
     api_responses = []
 
     with sync_playwright() as p:
@@ -177,65 +154,39 @@ def scrape_router(ip: str, username: str, password: str) -> dict:
         ctx = browser.new_context(ignore_https_errors=True)
         page = ctx.new_page()
         page.set_default_timeout(12000)
-
         base = f"http://{ip}"
 
         def on_response(response):
             try:
                 ct = response.headers.get("content-type", "")
-                if "json" in ct or "javascript" in ct:
-                    try:
-                        data = response.json()
-                        api_responses.append({"url": response.url, "data": data})
-                    except Exception:
-                        pass
+                if "json" in ct:
+                    data = response.json()
+                    api_responses.append({"url": response.url, "data": data})
             except Exception:
                 pass
 
         page.on("response", on_response)
-
-        print("    Opening admin panel...", end=" ", flush=True)
-        try:
-            page.goto(base, wait_until="domcontentloaded")
-            page.wait_for_timeout(2000)
-        except Exception:
-            print("FAILED — router not reachable")
-            browser.close()
-            return settings
-
-        html = page.content().lower()
-        brand = _detect_brand(html)
-        print(f"OK ({brand.upper()})")
-        settings["brand"] = brand
-
-        # Sky Hub: use requests-based scraper (no JS needed)
-        if brand == "sky":
-            browser.close()
-            return scrape_sky_hub_requests(ip, password)
+        page.goto(base, wait_until="domcontentloaded")
+        page.wait_for_timeout(2000)
 
         print("    Logging in...", end=" ", flush=True)
         _try_login(page, base, username, password, brand)
         page.wait_for_timeout(4000)
         print("OK")
 
-        sections = _get_sections(brand, base)
-        for name, url in sections:
+        for name, url in _get_sections(brand, base):
             print(f"    Visiting {name}...", end=" ", flush=True)
             try:
                 page.goto(url, wait_until="domcontentloaded")
                 page.wait_for_timeout(2500)
-                content = page.content()
-                extracted = _extract_from_page(content, name)
+                extracted = _extract_from_page(page.content(), name)
                 settings.update(extracted)
                 print(f"{len(extracted)} settings")
             except Exception:
-                print(f"skipped")
+                print("skipped")
 
-        if api_responses:
-            print(f"    Parsing {len(api_responses)} API response(s)...")
-            for resp in api_responses:
-                extracted = _extract_from_json(resp["data"], resp["url"])
-                settings.update(extracted)
+        for resp in api_responses:
+            settings.update(_extract_from_json(resp["data"], resp["url"]))
 
         browser.close()
 
@@ -601,7 +552,7 @@ def print_result(result: dict, router_ip: str) -> str:
             print(f"    [{f['severity'].upper():8}] {f['title']}")
         if len(findings) > 6:
             print(f"    ... and {len(findings)-6} more")
-    print(f"\n  Full report → {url}")
+    print(f"\n  Full report: {url}")
     print(f"  {'='*60}\n")
     return url
 
