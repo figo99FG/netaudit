@@ -132,6 +132,52 @@ export async function pingBackend(url: string): Promise<boolean> {
   }
 }
 
+export async function getSettings(): Promise<{ has_api_key: boolean; api_key_hint: string; ai_enabled: boolean }> {
+  const res = await fetch(`${BASE}/api/settings`);
+  if (!res.ok) throw new Error("Could not fetch settings");
+  return res.json();
+}
+
+export async function saveSettings(settings: { api_key?: string; ai_enabled?: boolean }): Promise<void> {
+  await fetch(`${BASE}/api/settings`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(settings),
+  });
+}
+
+export async function analyzeConfigAI(configText: string, deviceHint: DeviceType = "auto"): Promise<ScanResult> {
+  const res = await fetch(`${BASE}/api/analyze/ai`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ config_text: configText, device_hint: deviceHint }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "AI analysis failed");
+  }
+  return res.json();
+}
+
+export async function chatWithConfig(params: {
+  scan_id: string;
+  config_text: string;
+  message: string;
+  history: { role: "user" | "assistant"; content: string }[];
+}): Promise<string> {
+  const res = await fetch(`${BASE}/api/chat`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(params),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Chat failed");
+  }
+  const data = await res.json();
+  return data.reply;
+}
+
 export async function getNetworkResult(id: string): Promise<NetworkScanResult> {
   const res = await fetch(`${BASE}/api/scan/network/${id}`);
   if (!res.ok) throw new Error("Network scan not found");

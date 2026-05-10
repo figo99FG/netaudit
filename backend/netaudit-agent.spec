@@ -5,8 +5,6 @@ block_cipher = None
 
 backend_dir = os.path.abspath(".")
 
-import sys as _sys
-
 # Bundle the VC++ runtime DLLs so the exe works on machines that don't have
 # Microsoft Visual C++ Redistributable installed (common cause of python3xx.dll errors)
 _vc_dlls = []
@@ -26,12 +24,13 @@ a = Analysis(
     binaries=_vc_dlls,
     datas=[
         ("agent_bundle/nmap-setup.exe", "agent_bundle"),
-        ("main.py",        "."),
-        ("models.py",      "."),
-        ("db.py",          "."),
-        ("parser",         "parser"),
-        ("rules",          "rules"),
-        ("engine",         "engine"),
+        ("main.py",          "."),
+        ("models.py",        "."),
+        ("db.py",            "."),
+        ("config_store.py",  "."),
+        ("parser",           "parser"),
+        ("rules",            "rules"),
+        ("engine",           "engine"),
     ],
     hiddenimports=[
         "uvicorn",
@@ -55,6 +54,9 @@ a = Analysis(
         "PIL",
         "PIL.Image",
         "PIL.ImageDraw",
+        "anthropic",
+        "openai",
+        "sqlite3",
     ],
     hookspath=[],
     hooksconfig={},
@@ -71,13 +73,16 @@ pyz = PYZ(a.pure, a.zipped_data, cipher=block_cipher)
 exe = EXE(
     pyz,
     a.scripts,
-    [],                  # onedir: no binaries/datas in EXE itself
+    a.binaries,   # onefile: embed everything in the exe
+    a.zipfiles,
+    a.datas,
     name="NetAudit-Agent",
     debug=False,
     bootloader_ignore_signals=False,
     strip=False,
     upx=True,
     upx_exclude=[],
+    runtime_tmpdir=os.path.join(os.environ.get("LOCALAPPDATA", r"C:\Users\Public"), "NetAudit"),
     console=False,
     disable_windowed_traceback=False,
     target_arch=None,
@@ -85,16 +90,4 @@ exe = EXE(
     entitlements_file=None,
     uac_admin=False,
     icon=None,
-)
-
-# onedir: all files collected into dist/NetAudit-Agent/ folder
-coll = COLLECT(
-    exe,
-    a.binaries,
-    a.zipfiles,
-    a.datas,
-    strip=False,
-    upx=True,
-    upx_exclude=[],
-    name="NetAudit-Agent",
 )

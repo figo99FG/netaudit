@@ -6,6 +6,8 @@ import type { ScanResult, Severity } from "@/lib/api";
 import { getResult } from "@/lib/api";
 import ScoreGauge from "@/components/ScoreGauge";
 import FindingCard from "@/components/FindingCard";
+import ConfigChat from "@/components/ConfigChat";
+import SettingsModal from "@/components/SettingsModal";
 
 const SEV_ORDER: Severity[] = ["critical", "high", "medium", "low", "info"];
 
@@ -24,6 +26,8 @@ export default function ResultsPage() {
   const [filter, setFilter] = useState<Severity | "all">("all");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
+  const [showChat, setShowChat] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   useEffect(() => {
     const raw = searchParams.get("data");
@@ -167,7 +171,37 @@ export default function ResultsPage() {
             filtered.map((f, i) => <FindingCard key={f.rule_id + i} finding={f} index={i} />)
           )}
         </div>
+
+        {/* Chat */}
+        <div className="mt-10">
+          <button
+            onClick={() => setShowChat(c => !c)}
+            className="flex items-center gap-2 text-sm font-bold mb-4 transition-opacity hover:opacity-80"
+            style={{ color: showChat ? "var(--green)" : "#555" }}
+          >
+            <span style={{ color: "var(--green)" }}>◆</span>
+            {showChat ? "Hide AI chat" : "Chat with your config"}
+            <span className="text-xs px-2 py-0.5 rounded ml-1" style={{ background: "#1a1a1a", color: "#555" }}>AI</span>
+          </button>
+
+          {showChat && (
+            <div className="space-y-3">
+              <ConfigChat scanId={id} />
+              <p className="text-xs" style={{ color: "#4a5568" }}>
+                No API key?{" "}
+                <button onClick={() => setShowSettings(true)} style={{ color: "var(--green)" }}>
+                  Add one in Settings →
+                </button>
+              </p>
+            </div>
+          )}
+        </div>
       </div>
+
+      <SettingsModal
+        open={showSettings}
+        onClose={() => setShowSettings(false)}
+      />
     </main>
   );
 }

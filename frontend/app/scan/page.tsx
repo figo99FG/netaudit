@@ -2,7 +2,8 @@
 import { useState, useRef, useCallback, useEffect } from "react";
 import { useRouter } from "next/navigation";
 import type { DeviceType } from "@/lib/api";
-import { analyzeConfig, analyzeFile, liveScan, networkScan, pingBackend } from "@/lib/api";
+import { analyzeConfig, analyzeConfigAI, analyzeFile, liveScan, networkScan, pingBackend, getSettings } from "@/lib/api";
+import SettingsModal from "@/components/SettingsModal";
 
 type Tab = "paste" | "file" | "live" | "network" | "checklist";
 
@@ -78,6 +79,9 @@ export default function ScanPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [aiMode, setAiMode] = useState(false);
+  const [hasApiKey, setHasApiKey] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
 
   // Checklist state
   const [checklistAnswers, setChecklistAnswers] = useState<Record<string, boolean | null>>({});
@@ -122,6 +126,11 @@ export default function ScanPage() {
     return () => clearInterval(tick);
   }, [netScanning]);
 
+  // Check if API key is configured
+  useEffect(() => {
+    getSettings().then(s => setHasApiKey(s.has_api_key)).catch(() => {});
+  }, [showSettings]);
+
   // Auto-ping: fire immediately on tab switch + every 8s to keep status live
   useEffect(() => {
     if (tab !== "network") return;
@@ -149,7 +158,7 @@ export default function ScanPage() {
       let result;
       if (tab === "paste") {
         if (!configText.trim()) throw new Error("Paste a config first.");
-        result = await analyzeConfig(configText, deviceHint);
+        result = aiMode ? await analyzeConfigAI(configText, deviceHint) : await analyzeConfig(configText, deviceHint);
         router.push(`/results/${result.scan_id}`);
       } else if (tab === "file") {
         if (!file) throw new Error("Select a file first.");
@@ -894,22 +903,59 @@ export default function ScanPage() {
 
           {/* Submit */}
           {tab !== "checklist" && (
-            <div className="mt-6 flex items-center justify-end gap-3">
-              {tab === "network" && netPingStatus !== "ok" && (
-                <span className="text-xs" style={{ color: "#555" }}>Connect to local backend first</span>
+            <div className="mt-6 flex items-center justify-between gap-3 flex-wrap">
+              {/* AI toggle — only on paste/file tabs */}
+              {(tab === "paste" || tab === "file") && (
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={() => {
+                      if (!hasApiKey) { setShowSettings(true); return; }
+                      setAiMode(m => !m);
+                    }}
+                    className="flex items-center gap-2 px-3 py-1.5 rounded text-xs font-bold transition-all"
+                    style={{
+                      background: aiMode ? "#0a1a0a" : "#111",
+                      border: `1px solid ${aiMode ? "var(--green)" : "#2a2a2a"}`,
+                      color: aiMode ? "var(--green)" : "#555",
+                    }}
+                  >
+                    <span>◆</span>
+                    <span>{aiMode ? "AI mode ON" : "AI mode"}</span>
+                  </button>
+                  <button
+                    onClick={() => setShowSettings(true)}
+                    className="px-2 py-1.5 rounded text-xs transition-all"
+                    style={{ background: "#111", border: "1px solid #2a2a2a", color: "#555" }}
+                    title="AI Settings"
+                  >
+                    ⚙
+                  </button>
+                </div>
               )}
-              <button
-                onClick={submit}
-                disabled={loading || (tab === "network" && netPingStatus !== "ok")}
-                className="px-8 py-3 rounded font-bold text-sm tracking-widest transition-all disabled:opacity-40"
-                style={{ background: "var(--green)", color: "#000" }}
-              >
-                {loading
-                  ? tab === "network" ? "SCANNING NETWORK..." : "SCANNING..."
-                  : tab === "network" ? "SCAN NETWORK" : "ANALYZE"}
-              </button>
+
+              <div className="flex items-center gap-3 ml-auto">
+                {tab === "network" && netPingStatus !== "ok" && (
+                  <span className="text-xs" style={{ color: "#555" }}>Connect to local backend first</span>
+                )}
+                <button
+                  onClick={submit}
+                  disabled={loading || (tab === "network" && netPingStatus !== "ok")}
+                  className="px-8 py-3 rounded font-bold text-sm tracking-widest transition-all disabled:opacity-40"
+                  style={{ background: "var(--green)", color: "#000" }}
+                >
+                  {loading
+                    ? tab === "network" ? "SCANNING NETWORK..." : (aiMode ? "AI SCANNING..." : "SCANNING...")
+                    : tab === "network" ? "SCAN NETWORK" : (aiMode ? "AI ANALYZE" : "ANALYZE")}
+                </button>
+              </div>
             </div>
           )}
+
+          <SettingsModal
+            open={showSettings}
+            onClose={() => setShowSettings(false)}
+            onSaved={() => setHasApiKey(true)}
+          />
         </div>
       </div>
     </main>

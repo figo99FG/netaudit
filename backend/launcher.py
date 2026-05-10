@@ -1,14 +1,21 @@
 """
 NetAudit Agent — launcher.py
-Bundles the FastAPI backend into a desktop app.
-- Checks for nmap; if missing, runs bundled silent installer
-- Checks GitHub for a newer version and auto-updates
-- Starts uvicorn on localhost:8000 in a background thread
-- Opens the user's browser to the NetAudit website
-- Shows a system tray icon with Open / Stop options
 """
 import sys
 import os
+
+# ── Boot log — written before ANYTHING else so we know if Python started ──────
+try:
+    _boot_log = os.path.join(os.path.expanduser("~"), "NetAudit-boot.log")
+    with open(_boot_log, "a") as _f:
+        import datetime as _dt
+        _f.write(f"\n=== BOOT {_dt.datetime.now().isoformat()} ===\n")
+        _f.write(f"frozen={getattr(sys, 'frozen', False)}\n")
+        _f.write(f"executable={sys.executable}\n")
+        _f.write(f"version={sys.version}\n")
+        _f.write(f"_MEIPASS={getattr(sys, '_MEIPASS', 'N/A')}\n")
+except Exception as _boot_err:
+    pass  # silently ignore if can't write
 import subprocess
 import threading
 import webbrowser
@@ -16,7 +23,7 @@ import time
 import shutil
 import ctypes
 
-VERSION = "1.0.9"
+VERSION = "1.0.13"
 GITHUB_REPO = "figo99FG/netaudit"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -204,6 +211,7 @@ def start_backend():
             host="127.0.0.1",
             port=8000,
             log_level="warning",
+            log_config=None,   # frozen-exe fix: skip uvicorn's logging dictConfig
         )
     except Exception as exc:
         _log(f"BACKEND CRASH: {exc}")
@@ -239,7 +247,7 @@ def build_tray_icon():
     return img
 
 
-def run_tray():
+def run_tray(update_info: list = []):
     import pystray
     from pystray import MenuItem, Menu
 
@@ -252,6 +260,17 @@ def run_tray():
         icon.stop()
         os._exit(0)
 
+    def on_update(icon, item):
+        if update_info:
+            tag, url = update_info[0]
+            webbrowser.open(f"https://github.com/{GITHUB_REPO}/releases/tag/{tag}")
+
+    def _update_menu_item():
+        if update_info:
+            tag = update_info[0][0]
+            return MenuItem(f"⬆ Update available: {tag}", on_update)
+        return MenuItem("Up to date", None, enabled=False)
+
     icon = pystray.Icon(
         "NetAudit Agent",
         icon_img,
@@ -259,6 +278,10 @@ def run_tray():
         menu=Menu(
             MenuItem("NetAudit Agent  ●  Running", None, enabled=False),
             MenuItem("Open in Browser", on_open),
+            Menu.SEPARATOR,
+            MenuItem(lambda item: f"⬆ Update available: {update_info[0][0]}" if update_info else "Up to date",
+                     on_update,
+                     enabled=lambda item: bool(update_info)),
             Menu.SEPARATOR,
             MenuItem("Stop Agent", on_quit),
         ),
@@ -269,11 +292,6 @@ def run_tray():
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    # Auto-update disabled for now — users download manually from the site
-    # update = check_for_update()
-    # if update:
-    #     apply_update(*update)
-
     print("[agent] Checking nmap …")
     ensure_nmap()
 
@@ -291,8 +309,16 @@ def main():
         print("[agent] Backend didn't start in time — opening anyway")
         webbrowser.open(SITE_URL)
 
+    # Check for update in background — notify via tray, don't auto-install
+    update_info: list = []
+    def _bg_update_check():
+        result = check_for_update()
+        if result:
+            update_info.append(result)
+    threading.Thread(target=_bg_update_check, daemon=True).start()
+
     print("[agent] Starting tray icon")
-    run_tray()
+    run_tray(update_info)
 
 
 if __name__ == "__main__":

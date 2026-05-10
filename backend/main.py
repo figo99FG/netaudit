@@ -16,6 +16,7 @@ from slowapi.util import get_remote_address
 from slowapi.errors import RateLimitExceeded
 
 import db
+import config_store
 from models import AnalyzeRequest, LiveScanRequest, NetworkScanRequest, ScanResult, NetworkScanResult, DeviceType
 from parser.detector import detect_device_type, extract_hostname, extract_ios_version
 from parser import ios_parser, asa_parser, generic_parser, home_router_parser
@@ -214,7 +215,123 @@ async def get_network_result(request: Request, network_scan_id: str):
     return data
 
 
+# ---------------------------------------------------------------------------
+# Settings
+# ---------------------------------------------------------------------------
+@app.get("/api/settings")
+@limiter.limit("30/minute")
+async def get_settings(request: Request):
+    cfg = config_store.load()
+    key = cfg.get("api_key", "")
+    return {
+        "has_api_key": bool(key),
+        "api_key_hint": (key[:8] + "…") if len(key) > 8 else "",
+        "ai_enabled": cfg.get("ai_enabled", False),
+    }
+
+
+@app.post("/api/settings")
+@limiter.limit("10/minute")
+async def save_settings(request: Request, body: dict):
+    updates: dict = {}
+    if "api_key" in body:
+        updates["api_key"] = body["api_key"].strip()
+    if "ai_enabled" in body:
+        updates["ai_enabled"] = bool(body["ai_enabled"])
+    config_store.save(updates)
+    return {"ok": True}
+
+
+# ---------------------------------------------------------------------------
+# AI analysis
+# ---------------------------------------------------------------------------
+@app.post("/api/analyze/ai", response_model=ScanResult)
+@limiter.limit("5/minute")
+async def analyze_ai(request: Request, body: AnalyzeRequest):
+    """Full AI analysis — replaces rule engine for unknown configs, merges for known ones."""
+    from engine.ai_analyzer import analyze_with_ai
+    from engine.scorer import calculate_score
+
+    api_key = config_store.get("api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No API key configured. Go to Settings and add your Anthropic or OpenAI key.")
+
+    if not body.config_text.strip():
+        raise HTTPException(status_code=400, detail="config_text is empty")
+
+    # Run normal rule-based analysis first
+    rule_result = _run_analysis(body.config_text, body.device_hint)
+
+    # Run AI analysis
+    try:
+        ai_result = analyze_with_ai(body.config_text, api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI analysis failed: {e}")
+
+    # Merge: keep rule findings, add AI findings that aren't duplicates
+    existing_titles = {f.title.lower() for f in rule_result.findings}
+    for f in ai_result["findings"]:
+        if f.title.lower() not in existing_titles:
+            rule_result.findings.append(f)
+            existing_titles.add(f.title.lower())
+
+    # Override hostname/device_type if AI found something rule engine missed
+    if not rule_result.hostname and ai_result.get("hostname"):
+        rule_result.hostname = ai_result["hostname"]
+
+    rule_result.score, rule_result.grade, rule_result.summary = calculate_score(rule_result.findings)
+    db.save(rule_result.scan_id, rule_result.model_dump())
+    return rule_result
+
+
+@app.post("/api/chat")
+@limiter.limit("20/minute")
+async def chat(request: Request, body: dict):
+    """Chat about a scan result."""
+    from engine.ai_analyzer import chat_with_config
+
+    api_key = config_store.get("api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No API key configured.")
+
+    scan_id  = body.get("scan_id", "")
+    message  = body.get("message", "").strip()
+    history  = body.get("history", [])
+    config_text = body.get("config_text", "")
+
+    if not message:
+        raise HTTPException(status_code=400, detail="message is empty")
+
+    # Build findings summary from stored scan
+    findings_summary = ""
+    if scan_id:
+        data = db.load(scan_id)
+        if data:
+            findings = data.get("findings", [])
+            score    = data.get("score", "?")
+            grade    = data.get("grade", "?")
+            findings_summary = f"Score: {score}/100 (Grade {grade})\n"
+            for f in findings:
+                findings_summary += f"- [{f['severity'].upper()}] {f['title']}: {f['description']}\n"
+
+    try:
+        reply = chat_with_config(config_text, findings_summary, message, history, api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI error: {e}")
+
+    return {"reply": reply}
+
+
+@app.get("/api/history")
+@limiter.limit("30/minute")
+async def get_history(request: Request, limit: int = 100):
+    """Return slim summaries of all stored scans, newest first."""
+    return db.list_recent(limit=min(limit, 200))
+
+
 @app.get("/api/health")
 async def health():
     supabase_ok = db._client() is not None
-    return {"status": "ok", "storage": "supabase" if supabase_ok else "memory"}
+    sqlite_ok = db._sqlite() is not None
+    storage = "supabase" if supabase_ok else ("sqlite" if sqlite_ok else "memory")
+    return {"status": "ok", "storage": storage}
