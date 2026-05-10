@@ -310,9 +310,9 @@ export default function ScanPage() {
       </nav>
 
       <div className="max-w-4xl mx-auto px-6 py-10">
-        <h1 className="text-2xl font-bold mb-2 tracking-wide">Analyze Config</h1>
-        <p className="text-sm mb-6" style={{ color: "var(--text-muted)" }}>
-          Paste a running-config, upload a file, or connect directly to a device.
+        <h1 className="text-2xl font-bold mb-2 tracking-wide">Scan Your Network</h1>
+        <p className="text-sm mb-2" style={{ color: "var(--text-muted)" }}>
+          Choose the method that fits you best. Not sure? Start with <strong style={{ color: "var(--green)" }}>Quick Checklist</strong> — no technical knowledge required.
         </p>
 
         {/* New user quickstart banner */}
@@ -336,11 +336,28 @@ export default function ScanPage() {
 
         {/* Tabs */}
         <div className="flex gap-0 mb-0 flex-wrap" style={{ borderBottom: "1px solid #2a2a2a" }}>
-          <button style={tabStyle("paste")} onClick={() => setTab("paste")}>PASTE CONFIG</button>
-          <button style={tabStyle("file")} onClick={() => setTab("file")}>UPLOAD FILE</button>
-          <button style={tabStyle("live")} onClick={() => setTab("live")}>LIVE SCAN (SSH)</button>
-          <button style={tabStyle("network")} onClick={() => setTab("network")}>NETWORK SCAN</button>
-          <button style={tabStyle("checklist")} onClick={() => setTab("checklist")}>QUICK CHECKLIST</button>
+          {[
+            { id: "checklist", icon: "✅", label: "Quick Checklist",    sub: "No tech knowledge needed" },
+            { id: "paste",     icon: "📋", label: "Paste Config",       sub: "Have a running-config?" },
+            { id: "file",      icon: "📁", label: "Upload File",        sub: ".cfg · .txt · .conf" },
+            { id: "network",   icon: "🌐", label: "Network Scan",       sub: "Scan whole subnet" },
+            { id: "live",      icon: "🔗", label: "Live SSH Scan",      sub: "Connect directly" },
+          ].map(t => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id as Tab)}
+              className="flex flex-col items-start px-4 py-3 text-left transition-all"
+              style={{
+                background: tab === t.id ? "var(--bg-card)" : "transparent",
+                borderBottom: tab === t.id ? "2px solid var(--green)" : "2px solid transparent",
+                color: tab === t.id ? "var(--green)" : "#718096",
+                marginBottom: -1,
+              }}
+            >
+              <span className="text-xs font-bold flex items-center gap-1">{t.icon} {t.label}</span>
+              <span className="text-xs mt-0.5" style={{ color: tab === t.id ? "#718096" : "#4a5568" }}>{t.sub}</span>
+            </button>
+          ))}
         </div>
 
         {/* Panel */}
