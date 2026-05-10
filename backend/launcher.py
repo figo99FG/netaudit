@@ -130,29 +130,78 @@ def ensure_nmap():
         print("[agent] nmap installer timed out")
 
 
+LOG_FILE = os.path.join(os.path.expanduser("~"), "NetAudit-Agent.log")
+
+
+def _log(msg: str):
+    """Write to log file so errors are visible even with console=False."""
+    try:
+        with open(LOG_FILE, "a", encoding="utf-8") as f:
+            import datetime
+            f.write(f"[{datetime.datetime.now().isoformat()}] {msg}\n")
+    except Exception:
+        pass
+
+
+def _kill_port(port: int):
+    """Kill whatever is holding the given port (Windows only)."""
+    try:
+        result = subprocess.run(
+            ["netstat", "-ano"],
+            capture_output=True, text=True, timeout=5
+        )
+        for line in result.stdout.splitlines():
+            if f":{port}" in line and "LISTENING" in line:
+                pid = line.strip().split()[-1]
+                subprocess.run(["taskkill", "/F", "/PID", pid],
+                               capture_output=True, timeout=5)
+                _log(f"Killed process {pid} that was holding port {port}")
+    except Exception as e:
+        _log(f"_kill_port failed: {e}")
+
+
 def start_backend():
     """Start FastAPI via uvicorn in this thread (blocks)."""
-    # Add common nmap install paths to PATH so python-nmap can find it
-    extra_paths = [
-        r"C:\Program Files (x86)\Nmap",
-        r"C:\Program Files\Nmap",
-    ]
-    for p in extra_paths:
-        if p not in os.environ.get("PATH", ""):
-            os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
+    try:
+        # Add common nmap install paths to PATH
+        extra_paths = [
+            r"C:\Program Files (x86)\Nmap",
+            r"C:\Program Files\Nmap",
+        ]
+        for p in extra_paths:
+            if p not in os.environ.get("PATH", ""):
+                os.environ["PATH"] = p + os.pathsep + os.environ.get("PATH", "")
 
-    # Ensure backend folder is importable
-    backend_dir = os.path.dirname(os.path.abspath(__file__))
-    if backend_dir not in sys.path:
-        sys.path.insert(0, backend_dir)
+        # For frozen exe, also add _MEIPASS so modules are importable
+        if getattr(sys, "frozen", False):
+            meipass = getattr(sys, "_MEIPASS", "")
+            if meipass and meipass not in sys.path:
+                sys.path.insert(0, meipass)
 
-    import uvicorn
-    uvicorn.run(
-        "main:app",
-        host="127.0.0.1",
-        port=8000,
-        log_level="warning",
-    )
+        backend_dir = os.path.dirname(os.path.abspath(__file__))
+        if backend_dir not in sys.path:
+            sys.path.insert(0, backend_dir)
+
+        _log(f"sys.path = {sys.path[:4]}")
+        _log("Starting uvicorn on 127.0.0.1:8000")
+
+        # Free the port if something is holding it
+        import socket
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            if s.connect_ex(("127.0.0.1", 8000)) == 0:
+                _log("Port 8000 already in use — killing holder")
+                _kill_port(8000)
+                time.sleep(1)
+
+        import uvicorn
+        uvicorn.run(
+            "main:app",
+            host="127.0.0.1",
+            port=8000,
+            log_level="warning",
+        )
+    except Exception as exc:
+        _log(f"BACKEND CRASH: {exc}")
 
 
 def wait_for_backend(timeout: int = 15):
@@ -215,20 +264,10 @@ def run_tray():
 # ── Main ───────────────────────────────────────────────────────────────────────
 
 def main():
-    # Re-launch as admin if needed (nmap install requires elevation)
-    if not is_admin():
-        ctypes.windll.shell32.ShellExecuteW(
-            None, "runas", sys.executable, " ".join(sys.argv), None, 1
-        )
-        sys.exit(0)
-
-    print("[agent] Checking for updates …")
-    update = check_for_update()
-    if update:
-        new_tag, url = update
-        print(f"[update] new version {new_tag} found — applying …")
-        apply_update(url, new_tag)
-        # apply_update exits if successful; if we reach here, it failed — carry on
+    # Auto-update disabled for now — users download manually from the site
+    # update = check_for_update()
+    # if update:
+    #     apply_update(*update)
 
     print("[agent] Checking nmap …")
     ensure_nmap()
