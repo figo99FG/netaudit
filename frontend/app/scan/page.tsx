@@ -122,6 +122,17 @@ export default function ScanPage() {
     return () => clearInterval(tick);
   }, [netScanning]);
 
+  // Auto-ping every 8 seconds when on network tab to keep status live
+  useEffect(() => {
+    if (tab !== "network") return;
+    const poll = setInterval(async () => {
+      if (netScanning) return;
+      const ok = await pingBackend(netLocalUrl);
+      setNetPingStatus(ok ? "ok" : "fail");
+    }, 8000);
+    return () => clearInterval(poll);
+  }, [tab, netLocalUrl, netScanning]);
+
   const handleDrop = useCallback((e: React.DragEvent) => {
     e.preventDefault();
     setDragOver(false);
