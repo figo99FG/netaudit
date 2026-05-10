@@ -609,11 +609,21 @@ export default function ScanPage() {
                   </a>
                 </div>
 
-                <div className="flex items-start gap-2 text-xs mb-4" style={{ color: "#718096" }}>
+                <div className="flex items-start gap-2 text-xs mb-3" style={{ color: "#718096" }}>
                   <span style={{ color: "#00ff88" }}>ℹ</span>
                   <span>
                     The Agent needs to run on the <strong style={{ color: "#e2e8f0" }}>same computer that&apos;s connected to your network</strong> —
                     that&apos;s how it can reach your routers and devices. It runs quietly in your system tray.
+                  </span>
+                </div>
+
+                {/* SmartScreen notice */}
+                <div className="flex items-start gap-2 text-xs mb-4 p-3 rounded" style={{ background: "#1a1a2e", border: "1px solid #2d2d4e" }}>
+                  <span style={{ color: "#ffaa00" }}>⚠</span>
+                  <span style={{ color: "#718096" }}>
+                    <strong style={{ color: "#ffaa00" }}>Windows SmartScreen warning?</strong> That&apos;s normal for new apps without a paid certificate.
+                    Click <strong style={{ color: "#e2e8f0" }}>&quot;More info&quot;</strong> → <strong style={{ color: "#e2e8f0" }}>&quot;Run anyway&quot;</strong> to proceed.
+                    The source code is <a href="https://github.com/figo99FG/netaudit" target="_blank" rel="noopener noreferrer" style={{ color: "#00ff88" }}>open on GitHub</a> — you can verify it yourself.
                   </span>
                 </div>
 

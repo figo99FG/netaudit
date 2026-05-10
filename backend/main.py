@@ -1,20 +1,37 @@
 import sys, os
 sys.path.insert(0, os.path.dirname(__file__))
 
-import uuid
-from fastapi import FastAPI, HTTPException, UploadFile, File
-from fastapi.middleware.cors import CORSMiddleware
+# Load .env if present (local dev)
+try:
+    from dotenv import load_dotenv
+    load_dotenv(os.path.join(os.path.dirname(__file__), ".env"))
+except ImportError:
+    pass
 
-from models import AnalyzeRequest, LiveScanRequest, ScanResult, DeviceType
+import uuid
+from fastapi import FastAPI, HTTPException, Request, UploadFile, File
+from fastapi.middleware.cors import CORSMiddleware
+from slowapi import Limiter, _rate_limit_exceeded_handler
+from slowapi.util import get_remote_address
+from slowapi.errors import RateLimitExceeded
+
+import db
+from models import AnalyzeRequest, LiveScanRequest, NetworkScanRequest, ScanResult, NetworkScanResult, DeviceType
 from parser.detector import detect_device_type, extract_hostname, extract_ios_version
 from parser import ios_parser, asa_parser, generic_parser, home_router_parser
 from rules import ios_rules, asa_rules, generic_rules, home_router_rules
 from engine.scorer import calculate_score
 
-app = FastAPI(title="NetAudit API", version="1.0.0")
+# ---------------------------------------------------------------------------
+# Rate limiter
+# ---------------------------------------------------------------------------
+limiter = Limiter(key_func=get_remote_address, default_limits=["60/minute"])
+
+app = FastAPI(title="NetAudit API", version="1.1.0")
+app.state.limiter = limiter
+app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 
 ALLOWED_ORIGINS = os.getenv("ALLOWED_ORIGINS", "*").split(",")
-
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
@@ -22,9 +39,38 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-_results: dict[str, ScanResult] = {}
+
+# Private Network Access — lets public HTTPS pages (netaudit-blue.vercel.app)
+# reach this local agent over http://localhost:8000.
+# Chrome 94+ blocks such requests unless the server explicitly opts in.
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request as StarletteRequest
+from starlette.responses import Response as StarletteResponse
+
+class PrivateNetworkAccessMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: StarletteRequest, call_next):
+        # Respond to PNA preflight immediately
+        if (request.method == "OPTIONS" and
+                "access-control-request-private-network" in request.headers):
+            return StarletteResponse(
+                status_code=204,
+                headers={
+                    "Access-Control-Allow-Private-Network": "true",
+                    "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
+                    "Access-Control-Allow-Methods": "*",
+                    "Access-Control-Allow-Headers": "*",
+                },
+            )
+        response = await call_next(request)
+        response.headers["Access-Control-Allow-Private-Network"] = "true"
+        return response
+
+app.add_middleware(PrivateNetworkAccessMiddleware)
 
 
+# ---------------------------------------------------------------------------
+# Core analysis
+# ---------------------------------------------------------------------------
 def _run_analysis(config_text: str, device_hint: DeviceType) -> ScanResult:
     device_type = device_hint if device_hint != DeviceType.AUTO else detect_device_type(config_text)
 
@@ -49,6 +95,7 @@ def _run_analysis(config_text: str, device_hint: DeviceType) -> ScanResult:
         if f is not None and f.title not in seen_titles:
             seen_titles.add(f.title)
             findings.append(f)
+
     score, grade, summary = calculate_score(findings)
 
     return ScanResult(
@@ -63,57 +110,93 @@ def _run_analysis(config_text: str, device_hint: DeviceType) -> ScanResult:
     )
 
 
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
 @app.post("/api/analyze", response_model=ScanResult)
-async def analyze_config(request: AnalyzeRequest):
-    if not request.config_text.strip():
+@limiter.limit("20/minute")
+async def analyze_config(request: Request, body: AnalyzeRequest):
+    if not body.config_text.strip():
         raise HTTPException(status_code=400, detail="config_text is empty")
-    result = _run_analysis(request.config_text, request.device_hint)
-    _results[result.scan_id] = result
+    result = _run_analysis(body.config_text, body.device_hint)
+    db.save(result.scan_id, result.model_dump())
     return result
 
 
 @app.post("/api/analyze/upload", response_model=ScanResult)
-async def analyze_upload(file: UploadFile = File(...), device_hint: str = "auto"):
+@limiter.limit("20/minute")
+async def analyze_upload(request: Request, file: UploadFile = File(...), device_hint: str = "auto"):
     content = await file.read()
     config_text = content.decode("utf-8", errors="replace")
     hint = DeviceType(device_hint) if device_hint in DeviceType._value2member_map_ else DeviceType.AUTO
     result = _run_analysis(config_text, hint)
-    _results[result.scan_id] = result
+    db.save(result.scan_id, result.model_dump())
     return result
 
 
 @app.get("/api/results/{scan_id}", response_model=ScanResult)
-async def get_result(scan_id: str):
-    result = _results.get(scan_id)
-    if not result:
+@limiter.limit("60/minute")
+async def get_result(request: Request, scan_id: str):
+    data = db.load(scan_id)
+    if not data:
         raise HTTPException(status_code=404, detail="Scan not found")
-    return result
+    return data
 
 
 @app.post("/api/scan/live", response_model=ScanResult)
-async def live_scan(request: LiveScanRequest):
+@limiter.limit("5/minute")
+async def live_scan(request: Request, body: LiveScanRequest):
     from engine.live_scanner import ssh_pull_config, nmap_scan
     try:
         config_text = ssh_pull_config(
-            request.host, request.port, request.username, request.password, request.device_type
+            body.host, body.port, body.username, body.password, body.device_type
         )
     except Exception as e:
         raise HTTPException(status_code=502, detail=f"SSH connection failed: {e}")
 
-    result = _run_analysis(config_text, request.device_type)
+    result = _run_analysis(config_text, body.device_type)
 
-    if request.run_nmap:
+    if body.run_nmap:
         try:
-            extra = nmap_scan(request.host)
+            extra = nmap_scan(body.host)
             result.findings.extend(extra)
             result.score, result.grade, result.summary = calculate_score(result.findings)
         except Exception:
             pass
 
-    _results[result.scan_id] = result
+    db.save(result.scan_id, result.model_dump())
     return result
+
+
+@app.post("/api/scan/network", response_model=NetworkScanResult)
+@limiter.limit("3/minute")
+async def network_scan(request: Request, body: NetworkScanRequest):
+    from engine.network_scanner import scan_network
+    import asyncio, functools
+
+    loop = asyncio.get_event_loop()
+    result_dict = await loop.run_in_executor(
+        None,
+        functools.partial(
+            scan_network,
+            body.subnet, body.username, body.password,
+            body.ssh_port, _run_analysis,
+        )
+    )
+    db.save(result_dict["network_scan_id"], result_dict)
+    return result_dict
+
+
+@app.get("/api/scan/network/{network_scan_id}", response_model=NetworkScanResult)
+@limiter.limit("30/minute")
+async def get_network_result(request: Request, network_scan_id: str):
+    data = db.load(network_scan_id)
+    if not data:
+        raise HTTPException(status_code=404, detail="Network scan not found")
+    return data
 
 
 @app.get("/api/health")
 async def health():
-    return {"status": "ok"}
+    supabase_ok = db._client() is not None
+    return {"status": "ok", "storage": "supabase" if supabase_ok else "memory"}
