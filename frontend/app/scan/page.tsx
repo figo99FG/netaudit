@@ -346,7 +346,7 @@ export default function ScanPage() {
         </div>
 
         {/* Tabs */}
-        <div className="flex gap-0 mb-0 flex-wrap" style={{ borderBottom: "1px solid #2a2a2a" }}>
+        <div className="flex gap-0 mb-0 overflow-x-auto" style={{ borderBottom: "1px solid #2a2a2a", scrollbarWidth: "none" }}>
           {[
             { id: "checklist", icon: "✅", label: "Quick Checklist",    sub: "No tech knowledge needed" },
             { id: "paste",     icon: "📋", label: "Paste Config",       sub: "Have a running-config?" },
@@ -357,7 +357,7 @@ export default function ScanPage() {
             <button
               key={t.id}
               onClick={() => setTab(t.id as Tab)}
-              className="flex flex-col items-start px-4 py-3 text-left transition-all"
+              className="flex flex-col items-start px-4 py-3 text-left transition-all shrink-0"
               style={{
                 background: tab === t.id ? "var(--bg-card)" : "transparent",
                 borderBottom: tab === t.id ? "2px solid var(--green)" : "2px solid transparent",
