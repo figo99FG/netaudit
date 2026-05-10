@@ -16,7 +16,7 @@ import time
 import shutil
 import ctypes
 
-VERSION = "1.0.6"
+VERSION = "1.0.9"
 GITHUB_REPO = "figo99FG/netaudit"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 
@@ -194,8 +194,13 @@ def start_backend():
                 time.sleep(1)
 
         import uvicorn
+
+        # In a frozen PyInstaller exe, string-based "main:app" import can fail
+        # because importlib can't locate modules the same way. Import directly.
+        import main as _main_module
+        _log("main module imported OK, starting uvicorn")
         uvicorn.run(
-            "main:app",
+            _main_module.app,
             host="127.0.0.1",
             port=8000,
             log_level="warning",
