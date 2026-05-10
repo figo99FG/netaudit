@@ -595,12 +595,12 @@ export default function ScanPage() {
                   <div className="flex-1">
                     <p className="text-xs font-bold mb-0.5" style={{ color: "#e2e8f0" }}>NetAudit Agent for Windows</p>
                     <p className="text-xs" style={{ color: "#718096" }}>
-                      Download the zip · extract the folder · double-click <strong style={{ color: "#e2e8f0" }}>NetAudit-Agent.exe</strong> inside. That&apos;s it.
+                      Download and double-click — single exe, no install, no zip to extract.
                     </p>
-                    <p className="text-xs mt-1" style={{ color: "#4a5568" }}>~70 MB · Auto-updates · Free</p>
+                    <p className="text-xs mt-1" style={{ color: "#4a5568" }}>~70 MB · Free · Windows 10/11</p>
                   </div>
                   <a
-                    href="https://github.com/figo99FG/netaudit/releases/latest/download/NetAudit-Agent.zip"
+                    href="https://github.com/figo99FG/netaudit/releases/latest/download/NetAudit-Agent.exe"
                     download
                     className="shrink-0 px-5 py-2.5 rounded font-bold text-xs tracking-widest"
                     style={{ background: "var(--green)", color: "#000" }}
