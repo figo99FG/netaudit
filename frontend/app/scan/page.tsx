@@ -319,7 +319,9 @@ export default function ScanPage() {
         <a href="/" className="font-bold text-lg tracking-widest" style={{ color: "var(--green)" }}>
           NET<span style={{ color: "#e2e8f0" }}>AUDIT</span>
         </a>
-        <span className="text-xs" style={{ color: "var(--text-muted)" }}>SECURITY CONFIG ANALYZER</span>
+        <a href="/history" className="text-xs px-3 py-1 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
+          History
+        </a>
       </nav>
 
       <div className="max-w-4xl mx-auto px-6 py-10">

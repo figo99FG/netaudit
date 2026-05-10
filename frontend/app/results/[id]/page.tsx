@@ -83,6 +83,9 @@ export default function ResultsPage() {
           <button onClick={exportJson} className="text-xs px-3 py-2 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
             Export JSON
           </button>
+          <Link href="/history" className="text-xs px-3 py-2 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
+            History
+          </Link>
           <Link href="/scan" className="text-xs px-3 py-2 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
             New Scan
           </Link>

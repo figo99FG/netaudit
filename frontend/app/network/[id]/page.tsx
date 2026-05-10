@@ -150,7 +150,7 @@ function HostCard({ host }: { host: NetworkHostResult }) {
         {/* Score */}
         <div className="text-center shrink-0" style={{ minWidth: 56 }}>
           {isNmapOnly ? (
-            <div className="text-xs font-bold leading-tight" style={{ color: "#555" }}>No<br />config</div>
+            <div className="text-xs font-bold leading-tight text-center" style={{ color: "#555" }}>End<br />device</div>
           ) : host.score != null ? (
             <>
               <div className="text-2xl font-bold" style={{ color: gc }}>{host.score}</div>
@@ -220,7 +220,11 @@ function HostCard({ host }: { host: NetworkHostResult }) {
         <div className="mt-4 space-y-2 border-t pt-4" style={{ borderColor: "#1a1a1a" }}>
           {isNmapOnly && (
             <p className="text-xs p-3 rounded" style={{ background: "#1a1a1a", color: "#718096" }}>
-              SSH and HTTP login unavailable for this host. Only port scan data was collected — no config analysis possible.
+              <span style={{ color: "#e2e8f0", fontWeight: 600 }}>End device</span> — phone, laptop, TV or printer.
+              No SSH or admin panel found, so no config could be pulled.
+              {host.open_ports.length === 0
+                ? " No risky ports open."
+                : ` Open ports: ${host.open_ports.join(", ")}.`}
             </p>
           )}
           {host.error && (
@@ -302,9 +306,14 @@ export default function NetworkResultsPage() {
         <a href="/" className="font-bold text-lg tracking-widest" style={{ color: "var(--green)" }}>
           NET<span style={{ color: "#e2e8f0" }}>AUDIT</span>
         </a>
-        <a href="/scan" className="text-xs px-3 py-1 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
-          + New scan
-        </a>
+        <div className="flex gap-2">
+          <a href="/history" className="text-xs px-3 py-1 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
+            History
+          </a>
+          <a href="/scan" className="text-xs px-3 py-1 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
+            + New scan
+          </a>
+        </div>
       </nav>
 
       <div className="max-w-5xl mx-auto px-6 py-10">
