@@ -70,7 +70,7 @@ snmp-server community public RO
 
 export default function ScanPage() {
   const router = useRouter();
-  const [tab, setTab] = useState<Tab>("paste");
+  const [tab, setTab] = useState<Tab>("checklist");
   const [configText, setConfigText] = useState("");
   const [deviceHint, setDeviceHint] = useState<DeviceType>("auto");
   const [dragOver, setDragOver] = useState(false);
@@ -122,14 +122,16 @@ export default function ScanPage() {
     return () => clearInterval(tick);
   }, [netScanning]);
 
-  // Auto-ping every 8 seconds when on network tab to keep status live
+  // Auto-ping: fire immediately on tab switch + every 8s to keep status live
   useEffect(() => {
     if (tab !== "network") return;
-    const poll = setInterval(async () => {
+    const check = async () => {
       if (netScanning) return;
       const ok = await pingBackend(netLocalUrl);
       setNetPingStatus(ok ? "ok" : "fail");
-    }, 8000);
+    };
+    check(); // immediate check on tab switch
+    const poll = setInterval(check, 8000);
     return () => clearInterval(poll);
   }, [tab, netLocalUrl, netScanning]);
 
@@ -326,24 +328,61 @@ export default function ScanPage() {
           Choose the method that fits you best. Not sure? Start with <strong style={{ color: "var(--green)" }}>Quick Checklist</strong> — no technical knowledge required.
         </p>
 
-        {/* New user quickstart banner */}
-        <div className="mb-6 p-4 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
-          style={{ background: "#0d1f14", border: "1px solid #00ff8830" }}>
-          <div>
-            <p className="text-sm font-bold mb-1" style={{ color: "var(--green)" }}>Never done this before?</p>
+        {/* Contextual banner — changes per tab */}
+        {(tab === "paste" || tab === "file") && (
+          <div className="mb-6 p-4 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+            style={{ background: "#0d1f14", border: "1px solid #00ff8830" }}>
+            <div>
+              <p className="text-sm font-bold mb-1" style={{ color: "var(--green)" }}>Have a Cisco device?</p>
+              <p className="text-xs" style={{ color: "#718096" }}>
+                Run <code className="px-1 py-0.5 rounded text-xs" style={{ background: "#0a0a0a", color: "#00ff88" }}>show running-config</code> on the device and paste the output, or upload the .cfg file.
+                Or hit <strong style={{ color: "#e2e8f0" }}>Load sample</strong> to try a demo instantly.
+              </p>
+            </div>
+            <button
+              className="shrink-0 px-4 py-2 rounded font-bold text-xs tracking-widest"
+              style={{ background: "var(--green)", color: "#000" }}
+              onClick={() => { setTab("paste"); setConfigText(SAMPLE_CONFIG); }}
+            >
+              TRY SAMPLE →
+            </button>
+          </div>
+        )}
+        {tab === "checklist" && (
+          <div className="mb-6 p-4 rounded-lg" style={{ background: "#0d1f14", border: "1px solid #00ff8830" }}>
+            <p className="text-sm font-bold mb-1" style={{ color: "var(--green)" }}>No tech knowledge needed</p>
             <p className="text-xs" style={{ color: "#718096" }}>
-              On a Cisco device, run <code className="px-1 py-0.5 rounded text-xs" style={{ background: "#0a0a0a", color: "#00ff88" }}>show running-config</code> and paste the output below.
-              Or hit <strong style={{ color: "#e2e8f0" }}>Load sample</strong> to see what a scan looks like instantly.
+              Answer a few simple yes/no questions about your router settings. We&apos;ll score your security and tell you exactly what to fix — in plain English.
             </p>
           </div>
-          <button
-            className="shrink-0 px-4 py-2 rounded font-bold text-xs tracking-widest"
-            style={{ background: "var(--green)", color: "#000" }}
-            onClick={() => { setTab("paste"); setConfigText(SAMPLE_CONFIG); }}
-          >
-            TRY SAMPLE →
-          </button>
-        </div>
+        )}
+        {tab === "network" && (
+          <div className="mb-6 p-4 rounded-lg flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4"
+            style={{ background: "#0d1f14", border: "1px solid #00ff8830" }}>
+            <div>
+              <p className="text-sm font-bold mb-1" style={{ color: "var(--green)" }}>Scan every device on your network</p>
+              <p className="text-xs" style={{ color: "#718096" }}>
+                Download and run the NetAudit Agent on your computer — it discovers and audits all devices on your network automatically.
+              </p>
+            </div>
+            <a
+              href="https://github.com/figo99FG/netaudit/releases/latest/download/NetAudit-Agent.exe"
+              download
+              className="shrink-0 px-4 py-2 rounded font-bold text-xs tracking-widest"
+              style={{ background: "var(--green)", color: "#000" }}
+            >
+              ↓ DOWNLOAD AGENT
+            </a>
+          </div>
+        )}
+        {tab === "live" && (
+          <div className="mb-6 p-4 rounded-lg" style={{ background: "#0d1f14", border: "1px solid #00ff8830" }}>
+            <p className="text-sm font-bold mb-1" style={{ color: "var(--green)" }}>Connect directly via SSH</p>
+            <p className="text-xs" style={{ color: "#718096" }}>
+              Enter the IP, username and password of a Cisco device. NetAudit will SSH in, pull the running config, and audit it live. Credentials are never stored.
+            </p>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="flex gap-0 mb-0 overflow-x-auto" style={{ borderBottom: "1px solid #2a2a2a", scrollbarWidth: "none" }}>
@@ -543,32 +582,54 @@ export default function ScanPage() {
           {tab === "network" && (
             <div className="space-y-4">
 
-              {/* Step 1 — Local backend */}
+              {/* Step 1 — Download & run agent */}
               <div className="p-4 rounded-lg" style={{ background: "#0a0a0a", border: "1px solid #2a2a2a" }}>
-                <div className="flex items-center justify-between mb-3">
-                  <div>
-                    <span className="text-xs font-bold px-2 py-0.5 rounded mr-2" style={{ background: "#00ff8822", color: "#00ff88" }}>STEP 1</span>
-                    <span className="text-sm font-bold">Run local backend on your machine</span>
-                  </div>
-                  <button
-                    className="text-xs px-2 py-1 rounded"
-                    style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}
-                    onClick={() => setNetShowSetup(s => !s)}
-                  >
-                    {netShowSetup ? "Hide setup" : "Show setup"}
-                  </button>
+                <div className="mb-3">
+                  <span className="text-xs font-bold px-2 py-0.5 rounded mr-2" style={{ background: "#00ff8822", color: "#00ff88" }}>STEP 1</span>
+                  <span className="text-sm font-bold">Download &amp; run the NetAudit Agent</span>
                 </div>
 
-                {netShowSetup && (
-                  <div className="mb-4 space-y-3">
+                {/* Main download CTA */}
+                <div className="flex flex-col sm:flex-row items-start sm:items-center gap-4 mb-4 p-3 rounded-lg"
+                  style={{ background: "#0a1a0a", border: "1px solid #00ff8830" }}>
+                  <div className="flex-1">
+                    <p className="text-xs font-bold mb-0.5" style={{ color: "#e2e8f0" }}>NetAudit Agent for Windows</p>
                     <p className="text-xs" style={{ color: "#718096" }}>
-                      Network scanning runs from your machine — it needs to be on the same network as your devices.
-                      The easiest way is Docker (one command, no setup):
+                      Double-click to run — no installation needed. It starts automatically and opens this page.
                     </p>
+                    <p className="text-xs mt-1" style={{ color: "#4a5568" }}>67 MB · Auto-updates · Free</p>
+                  </div>
+                  <a
+                    href="https://github.com/figo99FG/netaudit/releases/latest/download/NetAudit-Agent.exe"
+                    download
+                    className="shrink-0 px-5 py-2.5 rounded font-bold text-xs tracking-widest"
+                    style={{ background: "var(--green)", color: "#000" }}
+                  >
+                    ↓ Download Agent
+                  </a>
+                </div>
 
-                    {/* Docker command — primary */}
+                <div className="flex items-start gap-2 text-xs mb-4" style={{ color: "#718096" }}>
+                  <span style={{ color: "#00ff88" }}>ℹ</span>
+                  <span>
+                    The Agent needs to run on the <strong style={{ color: "#e2e8f0" }}>same computer that&apos;s connected to your network</strong> —
+                    that&apos;s how it can reach your routers and devices. It runs quietly in your system tray.
+                  </span>
+                </div>
+
+                {/* Advanced toggle */}
+                <button
+                  className="text-xs mb-3"
+                  style={{ color: "#4a5568", textDecoration: "underline", background: "none", border: "none", cursor: "pointer", padding: 0 }}
+                  onClick={() => setNetShowSetup(s => !s)}
+                >
+                  {netShowSetup ? "▲ Hide advanced options" : "▼ Already running? Advanced options"}
+                </button>
+
+                {netShowSetup && (
+                  <div className="mb-4 space-y-3 pt-2 border-t" style={{ borderColor: "#1a1a1a" }}>
                     <div>
-                      <div className="text-xs mb-1 font-bold" style={{ color: "#555" }}>OPTION 1 — Docker (recommended)</div>
+                      <div className="text-xs mb-1 font-bold" style={{ color: "#555" }}>Docker</div>
                       <div className="flex items-center gap-2">
                         <pre className="flex-1 text-xs px-3 py-2 rounded font-mono overflow-x-auto"
                           style={{ background: "#141414", color: "#00ff88", border: "1px solid #1a1a1a" }}>
@@ -582,21 +643,11 @@ export default function ScanPage() {
                           Copy
                         </button>
                       </div>
-                      <p className="text-xs mt-1" style={{ color: "#4a5568" }}>
-                        Requires <a href="https://www.docker.com/products/docker-desktop/" target="_blank" rel="noopener noreferrer" style={{ color: "#718096", textDecoration: "underline" }}>Docker Desktop</a>.
-                        First run downloads the image (~80 MB), subsequent runs are instant.
-                      </p>
                     </div>
-
-                    {/* Python alternative */}
                     <div>
-                      <div className="text-xs mb-1 font-bold" style={{ color: "#555" }}>OPTION 2 — Python (if you have the source)</div>
+                      <div className="text-xs mb-1 font-bold" style={{ color: "#555" }}>Python (from source)</div>
                       <div className="space-y-1">
-                        {[
-                          "cd netaudit/backend",
-                          "pip install -r requirements.txt",
-                          "uvicorn main:app --reload",
-                        ].map((cmd, i) => (
+                        {["cd netaudit/backend", "pip install -r requirements.txt", "uvicorn main:app --reload"].map((cmd, i) => (
                           <pre key={i} className="text-xs px-3 py-1.5 rounded font-mono"
                             style={{ background: "#141414", color: "#a0aec0", border: "1px solid #1a1a1a" }}>
                             {cmd}
@@ -604,10 +655,6 @@ export default function ScanPage() {
                         ))}
                       </div>
                     </div>
-
-                    <p className="text-xs pt-1" style={{ color: "#4a5568" }}>
-                      Agent starts at <code className="px-1 rounded" style={{ background: "#0a0a0a", color: "#718096" }}>http://localhost:8000</code> — click <strong style={{ color: "#e2e8f0" }}>Test connection</strong> once it&apos;s up.
-                    </p>
                   </div>
                 )}
 
@@ -639,7 +686,7 @@ export default function ScanPage() {
                 )}
                 {netPingStatus === "fail" && (
                   <p className="text-xs mt-2" style={{ color: "#ff6666" }}>
-                    ✗ Not reachable — run <code className="px-1 rounded" style={{ background: "#1a1a1a", color: "#00ff88" }}>docker run -p 8000:8000 figo7799/netaudit-agent</code> in your terminal, then try again
+                    ✗ Agent not running — download and run the NetAudit Agent above, then click Test connection
                   </p>
                 )}
               </div>
