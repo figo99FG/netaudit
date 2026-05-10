@@ -42,28 +42,46 @@ app.add_middleware(
 
 # Private Network Access — lets public HTTPS pages (netaudit-blue.vercel.app)
 # reach this local agent over http://localhost:8000.
-# Chrome 94+ blocks such requests unless the server explicitly opts in.
-from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.requests import Request as StarletteRequest
-from starlette.responses import Response as StarletteResponse
+# Chrome 94+ blocks such requests unless the server opts in via this header.
+# Using raw ASGI middleware (not BaseHTTPMiddleware) to avoid the mutable-headers bug.
+from starlette.types import ASGIApp, Receive, Scope, Send
+from starlette.datastructures import MutableHeaders
 
-class PrivateNetworkAccessMiddleware(BaseHTTPMiddleware):
-    async def dispatch(self, request: StarletteRequest, call_next):
-        # Respond to PNA preflight immediately
-        if (request.method == "OPTIONS" and
-                "access-control-request-private-network" in request.headers):
-            return StarletteResponse(
-                status_code=204,
-                headers={
-                    "Access-Control-Allow-Private-Network": "true",
-                    "Access-Control-Allow-Origin": request.headers.get("origin", "*"),
-                    "Access-Control-Allow-Methods": "*",
-                    "Access-Control-Allow-Headers": "*",
-                },
-            )
-        response = await call_next(request)
-        response.headers["Access-Control-Allow-Private-Network"] = "true"
-        return response
+class PrivateNetworkAccessMiddleware:
+    def __init__(self, app: ASGIApp):
+        self.app = app
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send):
+        if scope["type"] == "http":
+            headers = dict(scope.get("headers", []))
+            method = scope.get("method", "")
+
+            # Handle PNA preflight directly — return 204 without touching the app
+            if (method == "OPTIONS" and
+                    b"access-control-request-private-network" in headers):
+                origin = headers.get(b"origin", b"*").decode()
+                response_headers = [
+                    (b"access-control-allow-private-network", b"true"),
+                    (b"access-control-allow-origin", origin.encode()),
+                    (b"access-control-allow-methods", b"*"),
+                    (b"access-control-allow-headers", b"*"),
+                    (b"content-length", b"0"),
+                ]
+                await send({"type": "http.response.start", "status": 204, "headers": response_headers})
+                await send({"type": "http.response.body", "body": b""})
+                return
+
+            # For all other requests: inject the PNA header into the response
+            async def send_with_pna(message):
+                if message["type"] == "http.response.start":
+                    raw = list(message.get("headers", []))
+                    raw.append((b"access-control-allow-private-network", b"true"))
+                    message = {**message, "headers": raw}
+                await send(message)
+
+            await self.app(scope, receive, send_with_pna)
+        else:
+            await self.app(scope, receive, send)
 
 app.add_middleware(PrivateNetworkAccessMiddleware)
 
