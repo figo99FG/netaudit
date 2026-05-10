@@ -5,10 +5,25 @@ block_cipher = None
 
 backend_dir = os.path.abspath(".")
 
+import sys as _sys
+
+# Bundle the VC++ runtime DLLs so the exe works on machines that don't have
+# Microsoft Visual C++ Redistributable installed (common cause of python3xx.dll errors)
+_vc_dlls = []
+for _dll in ["vcruntime140.dll", "vcruntime140_1.dll", "msvcp140.dll"]:
+    for _root in [
+        r"C:\Windows\System32",
+        r"C:\Users\girif\AppData\Local\Programs\Python\Python312",
+    ]:
+        _path = os.path.join(_root, _dll)
+        if os.path.exists(_path):
+            _vc_dlls.append((_path, "."))
+            break
+
 a = Analysis(
     ["launcher.py"],
     pathex=[backend_dir],
-    binaries=[],
+    binaries=_vc_dlls,
     datas=[
         ("agent_bundle/nmap-setup.exe", "agent_bundle"),
         ("main.py",        "."),

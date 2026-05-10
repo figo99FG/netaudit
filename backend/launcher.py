@@ -16,7 +16,7 @@ import time
 import shutil
 import ctypes
 
-VERSION = "1.0.5"
+VERSION = "1.0.6"
 GITHUB_REPO = "figo99FG/netaudit"
 GITHUB_API = f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest"
 

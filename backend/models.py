@@ -61,3 +61,35 @@ class LiveScanRequest(BaseModel):
     password: str
     device_type: DeviceType
     run_nmap: bool = False
+
+
+class NetworkScanRequest(BaseModel):
+    subnet: str          # e.g. "192.168.0.0/24" or "192.168.0.1-50"
+    username: str = "admin"
+    password: str
+    ssh_port: int = 22
+
+
+class NetworkHostResult(BaseModel):
+    ip: str
+    hostname: Optional[str] = None
+    device_type: Optional[str] = None
+    open_ports: list[int] = []
+    score: Optional[int] = None
+    grade: Optional[str] = None
+    summary: Optional[ScanSummary] = None
+    findings: list[Finding] = []
+    scan_id: Optional[str] = None
+    error: Optional[str] = None
+    method: Optional[str] = None
+
+
+class NetworkScanResult(BaseModel):
+    network_scan_id: str
+    subnet: str
+    hosts_found: int
+    hosts_scanned: int
+    avg_score: float
+    total_critical: int
+    total_high: int
+    hosts: list[NetworkHostResult]
