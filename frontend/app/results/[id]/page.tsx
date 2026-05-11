@@ -45,7 +45,7 @@ export default function ResultsPage() {
         setResult(r);
         setLoading(false);
         // Use cached enrichment if stored with the result
-        if (r.enrichment) setEnrichment(r.enrichment as unknown as ScanEnrichment);
+        if (r.enrichment) setEnrichment(r.enrichment);
       })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [id, searchParams]);

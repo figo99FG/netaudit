@@ -14,6 +14,19 @@ export interface Finding {
   remediation_snippet?: string;
 }
 
+export interface ActionItem {
+  priority: number;
+  title: string;
+  why: string;
+  effort: "low" | "medium" | "high";
+}
+
+export interface ScanEnrichment {
+  executive_summary: string;
+  action_plan: ActionItem[];
+  tailored_remediations: Record<string, string>;
+}
+
 export interface ScanSummary {
   critical: number;
   high: number;
@@ -31,6 +44,7 @@ export interface ScanResult {
   grade: string;
   summary: ScanSummary;
   findings: Finding[];
+  enrichment?: ScanEnrichment;
 }
 
 export async function analyzeConfig(configText: string, deviceHint: DeviceType = "auto"): Promise<ScanResult> {
@@ -130,19 +144,6 @@ export async function pingBackend(url: string): Promise<boolean> {
   } catch {
     return false;
   }
-}
-
-export interface ActionItem {
-  priority: number;
-  title: string;
-  why: string;
-  effort: "low" | "medium" | "high";
-}
-
-export interface ScanEnrichment {
-  executive_summary: string;
-  action_plan: ActionItem[];
-  tailored_remediations: Record<string, string>;
 }
 
 export async function enrichScan(scanId: string): Promise<ScanEnrichment> {
