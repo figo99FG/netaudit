@@ -10,6 +10,11 @@ interface Message {
 interface Props {
   scanId: string;
   configText?: string;
+  hostname?: string;
+  deviceType?: string;
+  score?: number;
+  grade?: string;
+  findings?: { severity: string; rule_id: string; title: string; description: string }[];
 }
 
 const SUGGESTIONS = [
@@ -20,7 +25,7 @@ const SUGGESTIONS = [
   "Explain this in simple terms",
 ];
 
-export default function ConfigChat({ scanId, configText = "" }: Props) {
+export default function ConfigChat({ scanId, configText = "", hostname, deviceType, score, grade, findings = [] }: Props) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput]       = useState("");
   const [loading, setLoading]   = useState(false);
@@ -42,16 +47,23 @@ export default function ConfigChat({ scanId, configText = "" }: Props) {
     setLoading(true);
 
     try {
+      const findingsSummary = findings
+        .map(f => `[${f.severity.toUpperCase()}] ${f.title}: ${f.description}`)
+        .join("\n");
+
       const reply = await chatWithConfig({
-        scan_id: scanId,
-        config_text: configText,
         message: msg,
         history: messages,
+        findings_summary: findingsSummary,
+        hostname,
+        device_type: deviceType,
+        score,
+        grade,
       });
       setMessages([...newMessages, { role: "assistant", content: reply }]);
     } catch (e: unknown) {
       const err = e instanceof Error ? e.message : "Chat failed";
-      setError(err.includes("API key") ? "Add your API key in Settings to use chat." : err);
+      setError(err.includes("not configured") ? "AI chat is not available right now." : err);
       setMessages(newMessages.slice(0, -1)); // remove the user message on error
     } finally {
       setLoading(false);

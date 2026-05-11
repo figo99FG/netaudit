@@ -50,14 +50,14 @@ export default function ResultsPage() {
       .catch(e => { setError(e.message); setLoading(false); });
   }, [id, searchParams]);
 
-  // Auto-fetch enrichment once result is loaded
+  // Auto-fetch enrichment once result is loaded (calls Vercel route, no user key needed)
   useEffect(() => {
     if (!result || enrichment) return;
     setEnriching(true);
-    enrichScan(id)
+    enrichScan(result)
       .then(e => { setEnrichment(e); setEnriching(false); })
-      .catch(() => setEnriching(false)); // silently fail — no API key or agent down
-  }, [result, id, enrichment]);
+      .catch(() => setEnriching(false)); // silently fail if AI unavailable
+  }, [result, enrichment]);
 
   const exportJson = () => {
     if (!result) return;
@@ -262,23 +262,17 @@ export default function ResultsPage() {
           </button>
 
           {showChat && (
-            <div className="space-y-3">
-              <ConfigChat scanId={id} />
-              <p className="text-xs" style={{ color: "#4a5568" }}>
-                No API key?{" "}
-                <button onClick={() => setShowSettings(true)} style={{ color: "var(--green)" }}>
-                  Add one in Settings →
-                </button>
-              </p>
-            </div>
+            <ConfigChat
+              scanId={id}
+              hostname={result.hostname}
+              deviceType={result.device_type}
+              score={result.score}
+              grade={result.grade}
+              findings={result.findings}
+            />
           )}
         </div>
       </div>
-
-      <SettingsModal
-        open={showSettings}
-        onClose={() => setShowSettings(false)}
-      />
     </main>
   );
 }

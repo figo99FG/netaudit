@@ -146,8 +146,20 @@ export async function pingBackend(url: string): Promise<boolean> {
   }
 }
 
-export async function enrichScan(scanId: string): Promise<ScanEnrichment> {
-  const res = await fetch(`${BASE}/api/enrich/${scanId}`, { signal: AbortSignal.timeout(30000) });
+export async function enrichScan(result: ScanResult): Promise<ScanEnrichment> {
+  // Hits the Vercel serverless route — key is server-side only, never exposed
+  const res = await fetch("/api/enrich", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({
+      hostname:    result.hostname,
+      device_type: result.device_type,
+      score:       result.score,
+      grade:       result.grade,
+      findings:    result.findings,
+    }),
+    signal: AbortSignal.timeout(30000),
+  });
   if (!res.ok) {
     const err = await res.json().catch(() => ({ detail: res.statusText }));
     throw new Error(err.detail ?? "Enrichment failed");
@@ -183,12 +195,16 @@ export async function analyzeConfigAI(configText: string, deviceHint: DeviceType
 }
 
 export async function chatWithConfig(params: {
-  scan_id: string;
-  config_text: string;
   message: string;
   history: { role: "user" | "assistant"; content: string }[];
+  findings_summary: string;
+  hostname?: string;
+  device_type?: string;
+  score?: number;
+  grade?: string;
 }): Promise<string> {
-  const res = await fetch(`${BASE}/api/chat`, {
+  // Hits the Vercel serverless route — no API key needed from the user
+  const res = await fetch("/api/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(params),
