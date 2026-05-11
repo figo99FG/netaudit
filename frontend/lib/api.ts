@@ -132,6 +132,28 @@ export async function pingBackend(url: string): Promise<boolean> {
   }
 }
 
+export interface ActionItem {
+  priority: number;
+  title: string;
+  why: string;
+  effort: "low" | "medium" | "high";
+}
+
+export interface ScanEnrichment {
+  executive_summary: string;
+  action_plan: ActionItem[];
+  tailored_remediations: Record<string, string>;
+}
+
+export async function enrichScan(scanId: string): Promise<ScanEnrichment> {
+  const res = await fetch(`${BASE}/api/enrich/${scanId}`, { signal: AbortSignal.timeout(30000) });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({ detail: res.statusText }));
+    throw new Error(err.detail ?? "Enrichment failed");
+  }
+  return res.json();
+}
+
 export async function getSettings(): Promise<{ has_api_key: boolean; api_key_hint: string; ai_enabled: boolean }> {
   const res = await fetch(`${BASE}/api/settings`);
   if (!res.ok) throw new Error("Could not fetch settings");

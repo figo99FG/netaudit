@@ -11,7 +11,11 @@ const SEVERITY_STYLES: Record<string, { bg: string; text: string; border: string
   info:     { bg: "#71809611", text: "#718096", border: "#4a5568", label: "INFO" },
 };
 
-export default function FindingCard({ finding, index }: { finding: Finding; index: number }) {
+export default function FindingCard({ finding, index, tailoredRemediation }: {
+  finding: Finding;
+  index: number;
+  tailoredRemediation?: string;
+}) {
   const [expanded, setExpanded] = useState(false);
   const s = SEVERITY_STYLES[finding.severity] ?? SEVERITY_STYLES.info;
 
@@ -67,7 +71,17 @@ export default function FindingCard({ finding, index }: { finding: Finding; inde
           </div>
           <div>
             <p className="text-xs font-bold mb-1" style={{ color: "#4a5568" }}>REMEDIATION</p>
-            <p className="text-sm" style={{ color: "#a0aec0" }}>{finding.remediation}</p>
+            {tailoredRemediation ? (
+              <div>
+                <div className="flex items-center gap-1 mb-1">
+                  <span style={{ color: "var(--green)", fontSize: 10 }}>◆</span>
+                  <span className="text-xs font-bold" style={{ color: "var(--green)" }}>AI — tailored to your config</span>
+                </div>
+                <p className="text-sm" style={{ color: "#a0aec0" }}>{tailoredRemediation}</p>
+              </div>
+            ) : (
+              <p className="text-sm" style={{ color: "#a0aec0" }}>{finding.remediation}</p>
+            )}
           </div>
           {finding.remediation_snippet && (
             <div>

@@ -17,7 +17,11 @@ from slowapi.errors import RateLimitExceeded
 
 import db
 import config_store
-from models import AnalyzeRequest, LiveScanRequest, NetworkScanRequest, ScanResult, NetworkScanResult, DeviceType
+from models import AnalyzeRequest, LiveScanRequest, NetworkScanRequest, ScanResult, NetworkScanResult, DeviceType, ScanEnrichment
+
+# Temporary store for config text — kept in memory so enrichment can access it
+# keyed by scan_id, cleared after enrichment or after 1 hour
+_config_cache: dict[str, str] = {}
 from parser.detector import detect_device_type, extract_hostname, extract_ios_version
 from parser import ios_parser, asa_parser, generic_parser, home_router_parser
 from rules import ios_rules, asa_rules, generic_rules, home_router_rules
@@ -138,8 +142,56 @@ async def analyze_config(request: Request, body: AnalyzeRequest):
     if not body.config_text.strip():
         raise HTTPException(status_code=400, detail="config_text is empty")
     result = _run_analysis(body.config_text, body.device_hint)
+    _config_cache[result.scan_id] = body.config_text   # cache for enrichment
     db.save(result.scan_id, result.model_dump())
     return result
+
+
+@app.get("/api/enrich/{scan_id}", response_model=ScanEnrichment)
+@limiter.limit("10/minute")
+async def enrich_scan(request: Request, scan_id: str):
+    """Generate AI enrichment for an existing scan. Returns cached enrichment if already done."""
+    from engine.ai_analyzer import enrich_result as _enrich
+
+    api_key = config_store.get("api_key", "")
+    if not api_key:
+        raise HTTPException(status_code=400, detail="No API key configured.")
+
+    # Return cached enrichment if already stored
+    stored = db.load(scan_id)
+    if not stored:
+        raise HTTPException(status_code=404, detail="Scan not found")
+    if stored.get("enrichment"):
+        return stored["enrichment"]
+
+    # Need the original config text
+    config_text = _config_cache.get(scan_id, "")
+
+    # Rebuild a minimal ScanResult for the enricher
+    import types
+    result_stub = types.SimpleNamespace(
+        device_type=stored.get("device_type", "generic"),
+        hostname=stored.get("hostname"),
+        score=stored.get("score", 0),
+        grade=stored.get("grade", "F"),
+        findings=[types.SimpleNamespace(
+            rule_id=f.get("rule_id", ""),
+            severity=f.get("severity", "info"),
+            title=f.get("title", ""),
+            description=f.get("description", ""),
+        ) for f in stored.get("findings", [])],
+    )
+
+    try:
+        enrichment = _enrich(config_text, result_stub, api_key)
+    except Exception as e:
+        raise HTTPException(status_code=502, detail=f"AI enrichment failed: {e}")
+
+    # Cache enrichment back into the stored scan
+    stored["enrichment"] = enrichment.model_dump()
+    db.save(scan_id, stored)
+
+    return enrichment
 
 
 @app.post("/api/analyze/upload", response_model=ScanResult)
@@ -149,6 +201,7 @@ async def analyze_upload(request: Request, file: UploadFile = File(...), device_
     config_text = content.decode("utf-8", errors="replace")
     hint = DeviceType(device_hint) if device_hint in DeviceType._value2member_map_ else DeviceType.AUTO
     result = _run_analysis(config_text, hint)
+    _config_cache[result.scan_id] = config_text
     db.save(result.scan_id, result.model_dump())
     return result
 

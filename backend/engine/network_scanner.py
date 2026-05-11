@@ -128,6 +128,146 @@ def _extract_sky(html: str) -> dict:
     return s
 
 
+def _extract_tplink(html: str, base: str, password: str) -> dict:
+    """Scrape TP-Link Luci / legacy web UI."""
+    import requests as _req
+    s: dict[str, str] = {"http_enable": "1"}
+    html_l = html.lower()
+
+    # WPS check
+    if "wps" in html_l:
+        s["wps_enable"] = "1" if "wps enabled" in html_l or "wps: enabled" in html_l else "0"
+
+    # Try to pull wireless config from tplink API endpoints (newer firmware)
+    for path in [
+        "/cgi-bin/luci/;stok=/rpc/xqsystem/login",
+        "/cgi-bin/luci",
+        "/userRpm/WlanNetworkRpm.htm",
+        "/userRpm/WlanSecurityRpm.htm",
+    ]:
+        try:
+            r = _req.get(f"{base}{path}", auth=("admin", password), timeout=5)
+            if r.ok and len(r.text) > 100:
+                t = r.text.lower()
+                if "wpa2" in t or "wpa3" in t:
+                    if "wpa3" in t:
+                        s["wl_security_mode"] = "WPA3"
+                    elif "wpa2" in t:
+                        s["wl_security_mode"] = "WPA2-PSK"
+                if "wep" in t:
+                    s["wl_security_mode"] = "WEP"
+                if "tkip" in t and "aes" not in t:
+                    s["wl_encrypt"] = "TKIP"
+                # Firmware version
+                fm = re.search(r"firmware[^\d]*(\d+\.\d+[\.\d]*)", t)
+                if fm:
+                    s["firmware_version"] = fm.group(1)
+                break
+        except Exception:
+            pass
+
+    # Ping / remote management
+    for path in ["/userRpm/FirewallGeneralRpm.htm", "/userRpm/RemoteManageControlRpm.htm"]:
+        try:
+            r = _req.get(f"{base}{path}", auth=("admin", password), timeout=5)
+            if r.ok:
+                t = r.text.lower()
+                if "enable" in t and "remote" in t:
+                    s["remote_mgmt"] = "enabled"
+        except Exception:
+            pass
+
+    return s
+
+
+def _extract_netgear(html: str, base: str, password: str) -> dict:
+    """Scrape Netgear router status pages."""
+    import requests as _req
+    s: dict[str, str] = {"http_enable": "1"}
+
+    for path in [
+        "/RST_st_poe.htm",
+        "/WLG_wireless.htm",
+        "/WLG_adv.htm",
+        "/ADV_home.htm",
+        "/setup.cgi?todo=status",
+    ]:
+        try:
+            r = _req.get(f"{base}{path}", auth=("admin", password), timeout=5)
+            if not r.ok or len(r.text) < 100:
+                continue
+            t = r.text.lower()
+            if "wep" in t:
+                s["wl_security_mode"] = "WEP"
+            elif "wpa3" in t:
+                s["wl_security_mode"] = "WPA3"
+            elif "wpa2" in t:
+                s["wl_security_mode"] = "WPA2-PSK"
+            if "tkip" in t and "aes" not in t:
+                s["wl_encrypt"] = "TKIP"
+            if "wps" in t:
+                s["wps_enable"] = "1" if "enabled" in t else "0"
+            fm = re.search(r"v(\d+\.\d+\.\d+[\._]\d+)", t)
+            if fm:
+                s["firmware_version"] = fm.group(1)
+            if "remote management" in t and "enable" in t:
+                s["remote_mgmt"] = "enabled"
+        except Exception:
+            pass
+
+    return s
+
+
+def _extract_asus(html: str, base: str, password: str) -> dict:
+    """Scrape ASUS router via nvram API."""
+    import requests as _req
+    s: dict[str, str] = {"http_enable": "1"}
+
+    # ASUS exposes nvram values via appGet.cgi
+    nvram_keys = [
+        "wl_ssid", "wl_auth_mode_x", "wl_wpa_mode", "wl_crypto",
+        "wps_enable", "fw_version", "wan_ping_x",
+        "wl_guest_num",
+    ]
+    try:
+        hook = "nvram_get(" + ")+nvram_get(".join(nvram_keys) + ")"
+        r = _req.get(
+            f"{base}/appGet.cgi",
+            params={"hook": hook},
+            auth=("admin", password),
+            timeout=6,
+        )
+        if r.ok:
+            for m in re.finditer(r'"(\w+)"\s*:\s*"([^"]*)"', r.text):
+                k, v = m.group(1), m.group(2)
+                if k == "wl_ssid":
+                    s["wl_ssid"] = v
+                elif k == "wl_auth_mode_x":
+                    s["wl_security_mode"] = v  # e.g. "psk2", "psk", "open"
+                elif k == "wl_crypto":
+                    s["wl_encrypt"] = v  # "aes", "tkip+aes", "tkip"
+                elif k == "wps_enable":
+                    s["wps_enable"] = v
+                elif k == "fw_version":
+                    s["firmware_version"] = v
+                elif k == "wan_ping_x" and v == "1":
+                    s["wan_ping"] = "enabled"
+    except Exception:
+        pass
+
+    # Fallback — scrape main page
+    if len(s) <= 1:
+        html_l = html.lower()
+        if "wep" in html_l:
+            s["wl_security_mode"] = "WEP"
+        elif "wpa3" in html_l:
+            s["wl_security_mode"] = "WPA3"
+        elif "wpa2" in html_l:
+            s["wl_security_mode"] = "WPA2-PSK"
+
+    return s
+
+
 def _try_http_router(ip: str, password: str) -> Optional[tuple[str, str]]:
     """Returns (config_text, brand) or None."""
     import requests as _req
@@ -137,17 +277,18 @@ def _try_http_router(ip: str, password: str) -> Optional[tuple[str, str]]:
     brand = "generic"
     settings: dict[str, str] = {}
 
-    # Detect brand
+    # Detect brand from landing page
     try:
-        r = _req.get(base, timeout=5)
-        html_lower = r.text.lower()
+        r = _req.get(base, timeout=5, allow_redirects=True)
+        html = r.text
+        html_lower = html.lower()
         if "sky" in html_lower:
             brand = "sky"
-        elif "tp-link" in html_lower:
+        elif "tp-link" in html_lower or "tplink" in html_lower:
             brand = "tplink"
         elif "netgear" in html_lower:
             brand = "netgear"
-        elif "asus" in html_lower:
+        elif "asus" in html_lower or "asuswrt" in html_lower:
             brand = "asus"
     except Exception:
         return None
@@ -161,8 +302,18 @@ def _try_http_router(ip: str, password: str) -> Optional[tuple[str, str]]:
                     settings.update(_extract_sky(r.text))
             except Exception:
                 pass
+
+    elif brand == "tplink":
+        settings.update(_extract_tplink(html, base, password))
+
+    elif brand == "netgear":
+        settings.update(_extract_netgear(html, base, password))
+
+    elif brand == "asus":
+        settings.update(_extract_asus(html, base, password))
+
     else:
-        # Generic: mark HTTP admin open, try basic auth on common paths
+        # Generic: mark HTTP admin open, try basic auth
         settings["http_enable"] = "1"
         for path in ["/", "/admin", "/cgi-bin/luci"]:
             try:
@@ -176,7 +327,7 @@ def _try_http_router(ip: str, password: str) -> Optional[tuple[str, str]]:
     if not settings:
         return None
 
-    lines = [f"# NetAudit scraped", f"# brand={brand}", ""]
+    lines = ["# NetAudit scraped", f"# brand={brand}", ""]
     for k, v in settings.items():
         lines.append(f"{k}={v}")
     return "\n".join(lines), brand

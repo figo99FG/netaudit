@@ -38,6 +38,19 @@ class ScanSummary(BaseModel):
     info: int = 0
 
 
+class ActionItem(BaseModel):
+    priority: int
+    title: str
+    why: str
+    effort: str = "medium"   # low | medium | high
+
+
+class ScanEnrichment(BaseModel):
+    executive_summary: str
+    action_plan: list[ActionItem] = []
+    tailored_remediations: dict[str, str] = {}   # rule_id → tailored text
+
+
 class ScanResult(BaseModel):
     scan_id: str
     device_type: DeviceType
@@ -47,6 +60,7 @@ class ScanResult(BaseModel):
     grade: str
     summary: ScanSummary
     findings: list[Finding]
+    enrichment: Optional[ScanEnrichment] = None
 
 
 class AnalyzeRequest(BaseModel):

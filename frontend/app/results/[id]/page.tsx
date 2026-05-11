@@ -2,8 +2,8 @@
 import { useEffect, useState } from "react";
 import { useParams, useSearchParams } from "next/navigation";
 import Link from "next/link";
-import type { ScanResult, Severity } from "@/lib/api";
-import { getResult } from "@/lib/api";
+import type { ScanResult, Severity, ScanEnrichment } from "@/lib/api";
+import { getResult, enrichScan } from "@/lib/api";
 import ScoreGauge from "@/components/ScoreGauge";
 import FindingCard from "@/components/FindingCard";
 import ConfigChat from "@/components/ConfigChat";
@@ -28,6 +28,8 @@ export default function ResultsPage() {
   const [error, setError] = useState("");
   const [showChat, setShowChat] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
+  const [enrichment, setEnrichment] = useState<ScanEnrichment | null>(null);
+  const [enriching, setEnriching] = useState(false);
 
   useEffect(() => {
     const raw = searchParams.get("data");
@@ -39,9 +41,23 @@ export default function ResultsPage() {
       } catch { /* fall through to fetch */ }
     }
     getResult(id)
-      .then(r => { setResult(r); setLoading(false); })
+      .then(r => {
+        setResult(r);
+        setLoading(false);
+        // Use cached enrichment if stored with the result
+        if (r.enrichment) setEnrichment(r.enrichment as unknown as ScanEnrichment);
+      })
       .catch(e => { setError(e.message); setLoading(false); });
   }, [id, searchParams]);
+
+  // Auto-fetch enrichment once result is loaded
+  useEffect(() => {
+    if (!result || enrichment) return;
+    setEnriching(true);
+    enrichScan(id)
+      .then(e => { setEnrichment(e); setEnriching(false); })
+      .catch(() => setEnriching(false)); // silently fail — no API key or agent down
+  }, [result, id, enrichment]);
 
   const exportJson = () => {
     if (!result) return;
@@ -141,6 +157,60 @@ export default function ResultsPage() {
           </div>
         </div>
 
+        {/* AI Enrichment */}
+        {enriching && !enrichment && (
+          <div className="mb-6 px-4 py-3 rounded-lg flex items-center gap-2 text-xs"
+            style={{ background: "#0a1a0a", border: "1px solid #00ff8822", color: "#718096" }}>
+            <span className="animate-pulse" style={{ color: "var(--green)" }}>◆</span>
+            AI is analysing your results…
+          </div>
+        )}
+
+        {enrichment && (
+          <div className="mb-8 space-y-4">
+            {/* Executive summary */}
+            <div className="p-5 rounded-xl" style={{ background: "#0a1a0a", border: "1px solid #00ff8833" }}>
+              <div className="flex items-center gap-2 mb-3">
+                <span style={{ color: "var(--green)" }}>◆</span>
+                <span className="text-xs font-bold tracking-widest" style={{ color: "var(--green)" }}>AI SUMMARY</span>
+              </div>
+              <p className="text-sm leading-relaxed" style={{ color: "#e2e8f0" }}>{enrichment.executive_summary}</p>
+            </div>
+
+            {/* Action plan */}
+            {enrichment.action_plan.length > 0 && (
+              <div className="p-5 rounded-xl" style={{ background: "#0d0d0d", border: "1px solid #1a1a1a" }}>
+                <div className="flex items-center gap-2 mb-4">
+                  <span style={{ color: "var(--green)" }}>◆</span>
+                  <span className="text-xs font-bold tracking-widest" style={{ color: "#718096" }}>ACTION PLAN — fix in this order</span>
+                </div>
+                <div className="space-y-3">
+                  {enrichment.action_plan.map(item => (
+                    <div key={item.priority} className="flex gap-4 items-start">
+                      <div className="shrink-0 w-6 h-6 rounded-full flex items-center justify-center text-xs font-bold"
+                        style={{ background: "#1a1a1a", color: "var(--green)", border: "1px solid #2a2a2a" }}>
+                        {item.priority}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center gap-2 mb-0.5 flex-wrap">
+                          <span className="text-sm font-bold" style={{ color: "#e2e8f0" }}>{item.title}</span>
+                          <span className="text-xs px-2 py-0.5 rounded" style={{
+                            background: item.effort === "low" ? "#0a1a0a" : item.effort === "high" ? "#1a0a0a" : "#1a1a0a",
+                            color: item.effort === "low" ? "#00ff88" : item.effort === "high" ? "#ff6666" : "#ffaa00",
+                          }}>
+                            {item.effort} effort
+                          </span>
+                        </div>
+                        <p className="text-xs" style={{ color: "#718096" }}>{item.why}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {/* Filter bar */}
         <div className="flex flex-wrap gap-2 mb-6">
           {(["all", ...SEV_ORDER] as const).map(sev => {
@@ -168,7 +238,14 @@ export default function ResultsPage() {
           {filtered.length === 0 ? (
             <p className="text-sm py-8 text-center" style={{ color: "#718096" }}>No findings at this severity.</p>
           ) : (
-            filtered.map((f, i) => <FindingCard key={f.rule_id + i} finding={f} index={i} />)
+            filtered.map((f, i) => (
+              <FindingCard
+                key={f.rule_id + i}
+                finding={f}
+                index={i}
+                tailoredRemediation={enrichment?.tailored_remediations?.[f.rule_id]}
+              />
+            ))
           )}
         </div>
 

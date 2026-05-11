@@ -113,6 +113,89 @@ def analyze_with_ai(config_text: str, api_key: str) -> dict:
     }
 
 
+def enrich_result(config_text: str, result, api_key: str) -> "ScanEnrichment":
+    """
+    Takes an existing ScanResult and returns a ScanEnrichment with:
+    - executive_summary  — plain English, specific to this device
+    - action_plan        — prioritised list of what to fix and why
+    - tailored_remediations — per-finding remediation using actual config details
+    """
+    from models import ScanEnrichment, ActionItem
+
+    findings_text = "\n".join(
+        f"[{f.severity.upper()}] {f.rule_id} — {f.title}: {f.description}"
+        for f in result.findings
+    ) or "No findings."
+
+    prompt = f"""You are a network security expert reviewing automated scan results.
+
+DEVICE: {result.device_type} | Hostname: {result.hostname or "unknown"} | Score: {result.score}/100 (Grade {result.grade})
+
+CONFIG (first 5000 chars):
+```
+{config_text[:5000]}
+```
+
+FINDINGS FROM RULE ENGINE:
+{findings_text}
+
+Your tasks:
+1. Write a 2–3 sentence executive_summary in plain English. Lead with the single biggest risk and what it means in practice. Be specific to this device — use the hostname and device type.
+2. Create an action_plan of up to 5 items ordered by impact. For each: what to do, why it matters most on this device, and how hard it is (low/medium/high effort).
+3. For each finding rule_id, write a tailored_remediation — use the actual hostname, interface names, IOS version if present. Make it copy-paste ready where possible.
+
+Return ONLY valid JSON, no markdown fences:
+{{
+  "executive_summary": "...",
+  "action_plan": [
+    {{"priority": 1, "title": "...", "why": "...", "effort": "low"}}
+  ],
+  "tailored_remediations": {{
+    "RULE-ID": "exact config commands or steps tailored to this device"
+  }}
+}}"""
+
+    if api_key.startswith("sk-ant-"):
+        from anthropic import Anthropic
+        client = Anthropic(api_key=api_key)
+        msg = client.messages.create(
+            model="claude-opus-4-5",
+            max_tokens=2048,
+            messages=[{"role": "user", "content": prompt}],
+        )
+        raw = msg.content[0].text.strip()
+    else:
+        from openai import OpenAI
+        client = OpenAI(api_key=api_key)
+        resp = client.chat.completions.create(
+            model="gpt-4o",
+            response_format={"type": "json_object"},
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=2048,
+        )
+        raw = resp.choices[0].message.content.strip()
+
+    raw = re.sub(r"^```json\s*", "", raw)
+    raw = re.sub(r"\s*```$", "", raw)
+    data = json.loads(raw)
+
+    action_plan = [
+        ActionItem(
+            priority=item.get("priority", i + 1),
+            title=item.get("title", ""),
+            why=item.get("why", ""),
+            effort=item.get("effort", "medium"),
+        )
+        for i, item in enumerate(data.get("action_plan", []))
+    ]
+
+    return ScanEnrichment(
+        executive_summary=data.get("executive_summary", ""),
+        action_plan=action_plan,
+        tailored_remediations=data.get("tailored_remediations", {}),
+    )
+
+
 def chat_with_config(
     config_text: str,
     findings_summary: str,
