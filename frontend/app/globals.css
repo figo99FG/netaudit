@@ -1,28 +1,138 @@
 @import "tailwindcss";
 
 :root {
-  --bg: #0d0d0d;
-  --bg-surface: #141414;
-  --bg-card: #1a1a1a;
-  --border: #2a2a2a;
-  --text: #e2e8f0;
-  --text-muted: #718096;
-  --green: #00ff88;
-  --red: #ff4444;
+  /* Backgrounds */
+  --bg:        #0a0a0a;
+  --bg-surface:#101010;
+  --bg-card:   #141414;
+  --bg-input:  #0c0c0c;
+  --bg-hover:  #1a1a1a;
+
+  /* Borders */
+  --border-dim:   #141414;
+  --border:       #1e1e1e;
+  --border-mid:   #262626;
+  --border-bright:#2e2e2e;
+
+  /* Brand */
+  --green:        #00ff88;
+  --green-dim:    #00cc6e;
+  --green-glow:   rgba(0, 255, 136, 0.12);
+  --green-subtle: rgba(0, 255, 136, 0.05);
+
+  /* Text */
+  --text:       #edf2ed;
+  --text-2:     #8a9e8a;
+  --text-muted: #526252;
+  --text-dim:   #323832;
+
+  /* Severity */
+  --critical: #ff4444;
+  --high:     #ff7700;
+  --medium:   #ffaa00;
+  --low:      #4da6ff;
+  --info:     #718096;
+
+  /* Fonts — values injected by next/font at build time */
+  --font-heading: var(--font-heading, 'Space Grotesk', system-ui, sans-serif);
+  --font-body:    system-ui, -apple-system, 'Segoe UI', Helvetica, Arial, sans-serif;
+  --font-mono:    var(--font-mono, 'JetBrains Mono', 'Fira Code', 'Courier New', monospace);
+
+  /* Backward-compat aliases used in inline styles across pages */
+  --red:   #ff4444;
   --amber: #ffaa00;
-  --blue: #4da6ff;
+  --blue:  #4da6ff;
 }
 
-* { box-sizing: border-box; }
+*, *::before, *::after { box-sizing: border-box; }
 
 body {
   background-color: var(--bg);
   color: var(--text);
-  font-family: 'JetBrains Mono', 'Fira Code', 'Courier New', monospace;
+  font-family: var(--font-body);
+  font-size: 16px;
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
   min-height: 100vh;
 }
 
-::-webkit-scrollbar { width: 6px; }
-::-webkit-scrollbar-track { background: var(--bg); }
-::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+h1, h2, h3, h4, h5, h6 {
+  font-family: var(--font-heading);
+  line-height: 1.2;
+  letter-spacing: -0.02em;
+}
+
+code, pre, kbd, samp,
+textarea[class*="mono"], .font-mono {
+  font-family: var(--font-mono);
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────── */
+::-webkit-scrollbar          { width: 5px; height: 5px; }
+::-webkit-scrollbar-track    { background: var(--bg); }
+::-webkit-scrollbar-thumb    { background: var(--border-mid); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--border-bright); }
+
+/* ── Focus ──────────────────────────────────────────────────── */
+:focus-visible {
+  outline: 2px solid var(--green);
+  outline-offset: 2px;
+}
+
+/* ── Utility: nav glass ─────────────────────────────────────── */
+.nav-glass {
+  background: rgba(10, 10, 10, 0.88);
+  backdrop-filter: blur(14px);
+  -webkit-backdrop-filter: blur(14px);
+}
+
+/* ── Utility: interactive card ──────────────────────────────── */
+.card-hover {
+  transition: border-color 160ms ease, background-color 160ms ease;
+}
+.card-hover:hover {
+  border-color: var(--border-bright) !important;
+  background-color: var(--bg-hover) !important;
+}
+
+/* ── Utility: green glow on focus/important elements ────────── */
+.glow-green {
+  box-shadow: 0 0 24px rgba(0, 255, 136, 0.08), 0 0 48px rgba(0, 255, 136, 0.03);
+}
+
+/* ── Severity left-border helpers (applied via className) ───── */
+.sev-critical { border-left: 3px solid var(--critical) !important; }
+.sev-high     { border-left: 3px solid var(--high)     !important; }
+.sev-medium   { border-left: 3px solid var(--medium)   !important; }
+.sev-low      { border-left: 3px solid var(--low)      !important; }
+.sev-info     { border-left: 3px solid var(--info)     !important; }
+
+/* ── Transitions for interactive elements ───────────────────── */
+button, a { transition: opacity 150ms ease, color 150ms ease, background-color 150ms ease, border-color 150ms ease; }
+button:active { transform: scale(0.98); }
+
+/* ── Landing page grid pattern ──────────────────────────────── */
+.hero-grid {
+  background-image:
+    linear-gradient(rgba(0,255,136,0.03) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(0,255,136,0.03) 1px, transparent 1px);
+  background-size: 40px 40px;
+}
+
+/* ── Pulse animation for scan dots ─────────────────────────── */
+@keyframes pulse-dot {
+  0%, 100% { opacity: 0.2; transform: scale(0.8); }
+  50%       { opacity: 1;   transform: scale(1.2); }
+}
+
+/* ── Shimmer for loading states ─────────────────────────────── */
+@keyframes shimmer {
+  from { background-position: -400px 0; }
+  to   { background-position:  400px 0; }
+}
+.shimmer {
+  background: linear-gradient(90deg, var(--bg-card) 25%, var(--bg-hover) 50%, var(--bg-card) 75%);
+  background-size: 400px 100%;
+  animation: shimmer 1.4s ease infinite;
+}

@@ -4,11 +4,11 @@ import { useParams } from "next/navigation";
 import { getNetworkResult, type NetworkScanResult, type NetworkHostResult } from "@/lib/api";
 
 const SEV_COLOR: Record<string, string> = {
-  critical: "#ff4444", high: "#ff7700", medium: "#ffaa00", low: "#4488ff", info: "#888",
+  critical: "#ff4444", high: "#ff7700", medium: "#ffaa00", low: "#4da6ff", info: "#718096",
 };
 
 function gradeColor(score?: number) {
-  if (score == null) return "#555";
+  if (score == null) return "var(--text-dim)";
   if (score >= 75) return "#00ff88";
   if (score >= 50) return "#ffaa00";
   return "#ff4444";
@@ -31,7 +31,6 @@ async function exportPDF(result: NetworkScanResult) {
   const doc = new jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
   const pageW = doc.internal.pageSize.getWidth();
 
-  // Header
   doc.setFillColor(13, 13, 13);
   doc.rect(0, 0, pageW, 28, "F");
   doc.setTextColor(0, 255, 136);
@@ -44,7 +43,6 @@ async function exportPDF(result: NetworkScanResult) {
   doc.text("Network Security Audit Report", 14, 19);
   doc.text(`Generated: ${new Date().toLocaleString()}`, 14, 25);
 
-  // Subnet + summary
   doc.setTextColor(226, 232, 240);
   doc.setFontSize(14);
   doc.setFont("helvetica", "bold");
@@ -54,7 +52,6 @@ async function exportPDF(result: NetworkScanResult) {
   doc.setTextColor(113, 128, 150);
   doc.text(`${result.hosts_found} hosts discovered · ${result.hosts_scanned} scanned`, 14, 45);
 
-  // Stats boxes
   const stats = [
     { label: "AVG SCORE", value: String(result.avg_score) },
     { label: "HOSTS FOUND", value: String(result.hosts_found) },
@@ -76,7 +73,6 @@ async function exportPDF(result: NetworkScanResult) {
     doc.text(s.label, x + (boxW - 3) / 2, 63, { align: "center" });
   });
 
-  // Host table
   const rows = result.hosts.map(h => [
     h.ip,
     h.hostname || "—",
@@ -98,7 +94,6 @@ async function exportPDF(result: NetworkScanResult) {
     margin: { left: 14, right: 14 },
   });
 
-  // Per-host findings
   result.hosts.forEach(h => {
     if (h.findings.length === 0) return;
     const lastY = (doc as unknown as { lastAutoTable?: { finalY: number } }).lastAutoTable?.finalY ?? 72;
@@ -137,125 +132,174 @@ async function exportPDF(result: NetworkScanResult) {
 function HostCard({ host }: { host: NetworkHostResult }) {
   const [open, setOpen] = useState(false);
   const isNmapOnly = host.method === "nmap_only";
-  const gc = isNmapOnly ? "#555" : gradeColor(host.score);
-  const topFindings = host.findings.slice(0, 3);
+  const gc = isNmapOnly ? "var(--text-dim)" : gradeColor(host.score);
 
   return (
     <div
-      className="rounded-lg p-4 cursor-pointer transition-all"
-      style={{ background: "#0d0d0d", border: `1px solid ${open ? "#2a2a2a" : "#1a1a1a"}` }}
+      className="card-hover rounded-xl cursor-pointer"
+      style={{
+        background: "var(--bg-surface)",
+        border: `1px solid ${open ? "var(--border-mid)" : "var(--border)"}`,
+        transition: "border-color 160ms ease, background-color 160ms ease",
+      }}
       onClick={() => setOpen(o => !o)}
     >
-      <div className="flex items-center justify-between gap-4">
-        {/* Score */}
-        <div className="text-center shrink-0" style={{ minWidth: 56 }}>
+      <div className="flex items-center gap-4 p-4">
+        {/* Score badge */}
+        <div className="text-center shrink-0" style={{ minWidth: 52 }}>
           {isNmapOnly ? (
-            <div className="text-xs font-bold leading-tight text-center" style={{ color: "#555" }}>End<br />device</div>
+            <div className="text-xs font-bold leading-tight text-center"
+              style={{ color: "var(--text-dim)", fontFamily: "var(--font-mono)" }}>
+              END<br />DEV
+            </div>
           ) : host.score != null ? (
             <>
-              <div className="text-2xl font-bold" style={{ color: gc }}>{host.score}</div>
-              <div className="text-xs font-bold" style={{ color: gc }}>{host.grade}</div>
+              <div className="text-xl font-bold" style={{ color: gc, fontFamily: "var(--font-heading)" }}>
+                {host.score}
+              </div>
+              <div className="text-xs font-bold" style={{ color: gc, fontFamily: "var(--font-mono)" }}>
+                {host.grade}
+              </div>
             </>
           ) : (
-            <div className="text-sm" style={{ color: "#555" }}>N/A</div>
+            <div className="text-sm" style={{ color: "var(--text-dim)" }}>—</div>
           )}
         </div>
 
+        {/* Divider */}
+        <div className="w-px h-10 shrink-0" style={{ background: "var(--border)" }} />
+
         {/* Info */}
         <div className="flex-1 min-w-0">
-          <div className="font-bold text-sm truncate">{host.hostname || host.ip}</div>
-          {host.hostname && host.hostname !== host.ip && (
-            <div className="text-xs" style={{ color: "#718096" }}>{host.ip}</div>
-          )}
-          <div className="flex gap-2 mt-1 flex-wrap">
+          <div className="font-semibold text-sm truncate mb-1"
+            style={{ color: "var(--text)", fontFamily: "var(--font-heading)" }}>
+            {host.hostname || host.ip}
+          </div>
+          <div className="flex gap-1.5 flex-wrap items-center">
+            {host.hostname && host.hostname !== host.ip && (
+              <span className="text-xs" style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                {host.ip}
+              </span>
+            )}
             {host.device_type && (
-              <span className="text-xs px-2 py-0.5 rounded" style={{ background: "#1a1a1a", color: "#888" }}>
+              <span className="text-xs px-2 py-0.5 rounded-md"
+                style={{ background: "var(--bg-card)", color: "var(--text-muted)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}>
                 {host.device_type}
               </span>
             )}
             {host.method && (
-              <span className="text-xs px-2 py-0.5 rounded" style={{ background: "#0a1a0a", color: "#00ff8888" }}>
+              <span className="text-xs px-2 py-0.5 rounded-md"
+                style={{ background: "rgba(0,255,136,0.06)", color: "rgba(0,255,136,0.6)", border: "1px solid rgba(0,255,136,0.12)", fontFamily: "var(--font-mono)" }}>
                 {host.method}
               </span>
             )}
             {host.open_ports.length > 0 && (
-              <span className="text-xs px-2 py-0.5 rounded" style={{ background: "#1a1a1a", color: "#718096" }}>
+              <span className="text-xs px-2 py-0.5 rounded-md"
+                style={{ background: "var(--bg-card)", color: "var(--text-muted)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}>
                 ports: {host.open_ports.join(", ")}
               </span>
             )}
           </div>
         </div>
 
-        {/* Top findings preview */}
-        <div className="hidden sm:flex gap-1 flex-wrap justify-end shrink-0" style={{ maxWidth: 240 }}>
+        {/* Severity chips preview */}
+        <div className="hidden sm:flex gap-1.5 flex-wrap justify-end shrink-0" style={{ maxWidth: 200 }}>
           {isNmapOnly ? (
-            <span className="text-xs px-2 py-0.5 rounded" style={{ background: "#1a1a1a", color: "#555" }}>
-              Port scan only
+            <span className="text-xs px-2 py-0.5 rounded-md"
+              style={{ background: "var(--bg-card)", color: "var(--text-dim)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}>
+              port scan only
             </span>
           ) : (
             <>
-              {topFindings.map((f, i) => (
-                <span key={i} className="text-xs px-2 py-0.5 rounded font-bold"
-                  style={{ background: `${SEV_COLOR[f.severity]}22`, color: SEV_COLOR[f.severity] }}>
+              {host.findings.slice(0, 3).map((f, i) => (
+                <span key={i} className="text-xs px-2 py-0.5 rounded-md font-bold"
+                  style={{ background: `${SEV_COLOR[f.severity]}18`, color: SEV_COLOR[f.severity], fontFamily: "var(--font-mono)" }}>
                   {f.severity.toUpperCase()}
                 </span>
               ))}
               {host.findings.length > 3 && (
-                <span className="text-xs px-2 py-0.5 rounded" style={{ background: "#1a1a1a", color: "#555" }}>
+                <span className="text-xs px-2 py-0.5 rounded-md"
+                  style={{ background: "var(--bg-card)", color: "var(--text-dim)", border: "1px solid var(--border)", fontFamily: "var(--font-mono)" }}>
                   +{host.findings.length - 3}
                 </span>
               )}
             </>
           )}
           {host.error && (
-            <span className="text-xs px-2 py-0.5 rounded" style={{ background: "#ff444422", color: "#ff6666" }}>ERR</span>
+            <span className="text-xs px-2 py-0.5 rounded-md font-bold"
+              style={{ background: "rgba(255,68,68,0.1)", color: "#ff6666", fontFamily: "var(--font-mono)" }}>
+              ERR
+            </span>
           )}
         </div>
 
-        <div className="text-xs shrink-0" style={{ color: "#555" }}>{open ? "▲" : "▼"}</div>
+        {/* Chevron */}
+        <div className="text-xs shrink-0 ml-1" style={{ color: "var(--text-dim)", transform: open ? "rotate(180deg)" : "rotate(0deg)", transition: "transform 200ms ease" }}>
+          ▼
+        </div>
       </div>
 
-      {/* Expanded */}
+      {/* Expanded detail */}
       {open && (
-        <div className="mt-4 space-y-2 border-t pt-4" style={{ borderColor: "#1a1a1a" }}>
+        <div className="px-4 pb-4 border-t space-y-2.5 pt-4" style={{ borderColor: "var(--border)" }}
+          onClick={e => e.stopPropagation()}>
+
           {isNmapOnly && (
-            <p className="text-xs p-3 rounded" style={{ background: "#1a1a1a", color: "#718096" }}>
-              <span style={{ color: "#e2e8f0", fontWeight: 600 }}>End device</span> — phone, laptop, TV or printer.
-              No SSH or admin panel found, so no config could be pulled.
+            <div className="p-3 rounded-lg text-xs leading-relaxed"
+              style={{ background: "var(--bg-card)", border: "1px solid var(--border)", color: "var(--text-muted)" }}>
+              <span className="font-semibold" style={{ color: "var(--text)" }}>End device</span>
+              {" "}— phone, laptop, TV or printer. No SSH or admin panel found, so no config could be pulled.
               {host.open_ports.length === 0
                 ? " No risky ports open."
                 : ` Open ports: ${host.open_ports.join(", ")}.`}
-            </p>
+            </div>
           )}
+
           {host.error && (
-            <p className="text-xs p-2 rounded" style={{ background: "#ff444411", color: "#ff6666" }}>{host.error}</p>
+            <div className="p-3 rounded-lg text-xs"
+              style={{ background: "rgba(255,68,68,0.06)", border: "1px solid rgba(255,68,68,0.2)", color: "#ff6666" }}>
+              {host.error}
+            </div>
           )}
+
           {!isNmapOnly && host.findings.length === 0 && !host.error && (
-            <p className="text-xs" style={{ color: "#4a5568" }}>No issues found.</p>
+            <p className="text-xs py-2" style={{ color: "var(--text-dim)" }}>No issues found.</p>
           )}
+
           {host.findings.map((f, i) => (
-            <div key={i} className="p-3 rounded" style={{ background: "#141414", border: `1px solid ${SEV_COLOR[f.severity]}33` }}>
-              <div className="flex items-center gap-2 mb-1">
-                <span className="text-xs font-bold px-2 py-0.5 rounded"
-                  style={{ background: `${SEV_COLOR[f.severity]}22`, color: SEV_COLOR[f.severity] }}>
+            <div key={i} className="p-3 rounded-lg"
+              style={{
+                background: "var(--bg-card)",
+                border: `1px solid ${SEV_COLOR[f.severity]}28`,
+                borderLeft: `3px solid ${SEV_COLOR[f.severity]}`,
+                borderRadius: "0 8px 8px 0",
+              }}>
+              <div className="flex items-center gap-2 mb-1.5 flex-wrap">
+                <span className="text-xs font-bold px-2 py-0.5 rounded-md"
+                  style={{ background: `${SEV_COLOR[f.severity]}18`, color: SEV_COLOR[f.severity], fontFamily: "var(--font-mono)" }}>
                   {f.severity.toUpperCase()}
                 </span>
-                <span className="text-sm font-bold">{f.title}</span>
+                <span className="text-sm font-semibold" style={{ color: "var(--text)", fontFamily: "var(--font-heading)" }}>
+                  {f.title}
+                </span>
               </div>
-              <p className="text-xs mb-2" style={{ color: "#718096" }}>{f.description}</p>
+              <p className="text-xs leading-relaxed mb-2" style={{ color: "var(--text-2)" }}>
+                {f.description}
+              </p>
               {f.remediation_snippet && (
-                <pre className="text-xs p-2 rounded font-mono overflow-x-auto"
-                  style={{ background: "#0a0a0a", color: "#00ff88" }}>
+                <pre className="text-xs p-3 rounded-lg overflow-x-auto"
+                  style={{ background: "var(--bg-input)", color: "var(--green)", margin: 0, fontFamily: "var(--font-mono)", lineHeight: 1.7 }}>
                   {f.remediation_snippet}
                 </pre>
               )}
             </div>
           ))}
+
           {host.scan_id && (
             <a
               href={`/results/${host.scan_id}`}
-              className="inline-block text-xs mt-2 px-3 py-1 rounded"
-              style={{ background: "#1a1a1a", color: "var(--green)", border: "1px solid #2a2a2a" }}
+              className="inline-block text-xs mt-1 px-3 py-1.5 rounded-lg font-semibold hover:opacity-80"
+              style={{ background: "var(--bg-card)", color: "var(--green)", border: "1px solid var(--border-mid)", fontFamily: "var(--font-mono)" }}
               onClick={e => e.stopPropagation()}
             >
               Full report for this device →
@@ -285,15 +329,21 @@ export default function NetworkResultsPage() {
 
   if (error) return (
     <main className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg)" }}>
-      <p className="text-red-400">{error}</p>
+      <div className="text-center space-y-3">
+        <p className="font-semibold" style={{ color: "var(--critical)", fontFamily: "var(--font-heading)" }}>{error}</p>
+        <a href="/scan" className="text-sm hover:opacity-80" style={{ color: "var(--green)" }}>← New scan</a>
+      </div>
     </main>
   );
 
   if (!result) return (
     <main className="min-h-screen flex items-center justify-center" style={{ background: "var(--bg)" }}>
       <div className="text-center space-y-3">
-        <div className="text-2xl" style={{ color: "var(--green)" }}>Loading...</div>
-        <p className="text-sm" style={{ color: "#718096" }}>Fetching scan results</p>
+        <div className="text-sm font-bold tracking-widest animate-pulse"
+          style={{ color: "var(--green)", fontFamily: "var(--font-mono)" }}>
+          LOADING…
+        </div>
+        <p className="text-xs" style={{ color: "var(--text-muted)" }}>Fetching scan results</p>
       </div>
     </main>
   );
@@ -302,64 +352,85 @@ export default function NetworkResultsPage() {
 
   return (
     <main className="min-h-screen" style={{ background: "var(--bg)" }}>
-      <nav className="border-b px-6 py-4 flex items-center justify-between" style={{ borderColor: "#2a2a2a" }}>
-        <a href="/" className="font-bold text-lg tracking-widest" style={{ color: "var(--green)" }}>
-          NET<span style={{ color: "#e2e8f0" }}>AUDIT</span>
+
+      {/* Nav */}
+      <nav className="nav-glass border-b px-6 py-4 flex items-center justify-between sticky top-0 z-40"
+        style={{ borderColor: "var(--border)" }}>
+        <a href="/" className="font-bold text-lg tracking-widest hover:opacity-80"
+          style={{ fontFamily: "var(--font-heading)", color: "var(--green)" }}>
+          NET<span style={{ color: "var(--text)" }}>AUDIT</span>
         </a>
-        <div className="flex gap-2">
-          <a href="/history" className="text-xs px-3 py-1 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
+        <div className="flex items-center gap-2">
+          <button
+            onClick={async () => { setPdfLoading(true); await exportPDF(result); setPdfLoading(false); }}
+            disabled={pdfLoading}
+            className="text-xs px-3 py-2 rounded font-bold hover:opacity-90 disabled:opacity-50"
+            style={{ background: "var(--green)", color: "#000", fontFamily: "var(--font-heading)" }}>
+            {pdfLoading ? "Generating…" : "Export PDF"}
+          </button>
+          <button
+            onClick={() => exportJSON(result)}
+            className="text-xs px-3 py-2 rounded hover:opacity-80"
+            style={{ background: "var(--bg-card)", color: "var(--text-muted)", border: "1px solid var(--border-mid)" }}>
+            Export JSON
+          </button>
+          <a href="/history"
+            className="text-xs px-3 py-2 rounded hover:opacity-80"
+            style={{ background: "var(--bg-card)", color: "var(--text-muted)", border: "1px solid var(--border-mid)" }}>
             History
           </a>
-          <a href="/scan" className="text-xs px-3 py-1 rounded" style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}>
-            + New scan
+          <a href="/scan"
+            className="text-xs px-3 py-2 rounded hover:opacity-80"
+            style={{ background: "var(--bg-card)", color: "var(--text-muted)", border: "1px solid var(--border-mid)" }}>
+            + New Scan
           </a>
         </div>
       </nav>
 
       <div className="max-w-5xl mx-auto px-6 py-10">
-        <div className="mb-2 text-xs font-bold tracking-widest" style={{ color: "#555" }}>NETWORK SCAN</div>
+
+        {/* Header */}
+        <p className="text-xs font-bold tracking-widest mb-2"
+          style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+          NETWORK SCAN
+        </p>
         <div className="flex items-start justify-between gap-4 mb-1 flex-wrap">
-          <h1 className="text-2xl font-bold">{result.subnet}</h1>
-          {/* Export buttons */}
-          <div className="flex gap-2">
-            <button
-              onClick={() => exportJSON(result)}
-              className="text-xs px-3 py-1.5 rounded font-bold transition-opacity hover:opacity-80"
-              style={{ background: "#1a1a1a", color: "#718096", border: "1px solid #2a2a2a" }}
-            >
-              Export JSON
-            </button>
-            <button
-              onClick={async () => { setPdfLoading(true); await exportPDF(result); setPdfLoading(false); }}
-              disabled={pdfLoading}
-              className="text-xs px-3 py-1.5 rounded font-bold transition-opacity hover:opacity-80 disabled:opacity-50"
-              style={{ background: "#0a1a0a", color: "var(--green)", border: "1px solid #00ff8833" }}
-            >
-              {pdfLoading ? "Generating…" : "Export PDF"}
-            </button>
-          </div>
+          <h1 className="text-2xl font-bold" style={{ fontFamily: "var(--font-heading)" }}>
+            {result.subnet}
+          </h1>
         </div>
-        <p className="text-sm mb-8" style={{ color: "#718096" }}>
-          {result.hosts_found} host{result.hosts_found !== 1 ? "s" : ""} discovered &middot; {result.hosts_scanned} scanned
+        <p className="text-sm mb-8" style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+          {result.hosts_found} host{result.hosts_found !== 1 ? "s" : ""} discovered
+          &nbsp;·&nbsp;
+          {result.hosts_scanned} scanned
         </p>
 
-        {/* Stats bar */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 gap-4 mb-8">
+        {/* Stats grid */}
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mb-8">
           {[
-            { label: "AVG SCORE",   value: result.avg_score,       color: gc },
-            { label: "HOSTS FOUND", value: result.hosts_found,     color: "#e2e8f0" },
-            { label: "CRITICAL",    value: result.total_critical,  color: result.total_critical > 0 ? "#ff4444" : "#555" },
-            { label: "HIGH",        value: result.total_high,      color: result.total_high > 0 ? "#ff7700" : "#555" },
+            { label: "AVG SCORE",   value: result.avg_score,      color: gc },
+            { label: "HOSTS FOUND", value: result.hosts_found,    color: "var(--text)" },
+            { label: "CRITICAL",    value: result.total_critical, color: result.total_critical > 0 ? "#ff4444" : "var(--text-dim)" },
+            { label: "HIGH",        value: result.total_high,     color: result.total_high > 0 ? "#ff7700" : "var(--text-dim)" },
           ].map(stat => (
-            <div key={stat.label} className="p-4 rounded-lg text-center" style={{ background: "#0d0d0d", border: "1px solid #1a1a1a" }}>
-              <div className="text-3xl font-bold" style={{ color: stat.color }}>{stat.value}</div>
-              <div className="text-xs mt-1 font-bold tracking-widest" style={{ color: "#555" }}>{stat.label}</div>
+            <div key={stat.label} className="p-4 rounded-xl text-center"
+              style={{ background: "var(--bg-surface)", border: "1px solid var(--border)" }}>
+              <div className="text-3xl font-bold mb-1" style={{ color: stat.color, fontFamily: "var(--font-heading)" }}>
+                {stat.value}
+              </div>
+              <div className="text-xs font-bold tracking-widest" style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+                {stat.label}
+              </div>
             </div>
           ))}
         </div>
 
         {/* Host list */}
-        <div className="space-y-3">
+        <p className="text-xs font-bold tracking-widest mb-3"
+          style={{ color: "var(--text-muted)", fontFamily: "var(--font-mono)" }}>
+          HOSTS — {result.hosts.length} device{result.hosts.length !== 1 ? "s" : ""}
+        </p>
+        <div className="space-y-2.5">
           {result.hosts.map(host => (
             <HostCard key={host.ip} host={host} />
           ))}

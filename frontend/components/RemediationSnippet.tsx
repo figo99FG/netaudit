@@ -11,19 +11,33 @@ export default function RemediationSnippet({ snippet }: { snippet: string }) {
   };
 
   return (
-    <div className="relative mt-2 rounded" style={{ background: "#0a0a0a", border: "1px solid #2a2a2a" }}>
+    <div
+      className="relative rounded-lg"
+      style={{ background: "var(--bg-input)", border: "1px solid var(--border)" }}
+    >
       <button
-        onClick={copy}
-        className="absolute top-2 right-2 text-xs px-2 py-1 rounded transition-colors"
+        onClick={(e) => { e.stopPropagation(); copy(); }}
+        className="absolute top-2.5 right-2.5 text-xs px-2.5 py-1 rounded font-medium"
         style={{
-          background: copied ? "#00ff8822" : "#1a1a1a",
-          color: copied ? "#00ff88" : "#718096",
-          border: "1px solid #2a2a2a",
+          background: copied ? "rgba(0,255,136,0.12)" : "var(--bg-card)",
+          color: copied ? "var(--green)" : "var(--text-muted)",
+          border: `1px solid ${copied ? "rgba(0,255,136,0.3)" : "var(--border)"}`,
+          fontFamily: "var(--font-mono)",
+          transition: "all 200ms ease",
+        }}
+        aria-label={copied ? "Copied to clipboard" : "Copy to clipboard"}
+      >
+        {copied ? "✓ Copied" : "Copy"}
+      </button>
+      <pre
+        className="p-4 text-xs overflow-x-auto"
+        style={{
+          color: "var(--green)",
+          margin: 0,
+          fontFamily: "var(--font-mono)",
+          lineHeight: 1.7,
         }}
       >
-        {copied ? "Copied!" : "Copy"}
-      </button>
-      <pre className="p-4 text-xs overflow-x-auto" style={{ color: "#00ff88", margin: 0 }}>
         {snippet}
       </pre>
     </div>
